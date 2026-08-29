@@ -83,7 +83,7 @@ ReviewReason:
 
 ### 2.3 Artist Watch / Artist Catalog
 
-ArtistSetting は以下を持ちます。
+ArtistSetting:
 
 - Artist name
 - Exact / Contains
@@ -189,7 +189,8 @@ Retry:
 ManualWork:
 
 - SQLite に Pending / Running / Completed / Failed を永続化
-- FullScrape と ArtistCatalog
+- `FullScrape` / `ArtistCatalog`
+- PR #26 では急減許可後の対象カテゴリだけを再取得する `CategoryScrape` を追加
 - Web 操作は enqueue して即応答
 - BackgroundService が manual → due retry → scheduled の優先順で処理
 - 起動時に中断された Running を Pending へ戻す
@@ -222,7 +223,54 @@ Webhook 送信失敗はログ警告に留め、本体の取得結果や Retry �
 
 設定画面から保存済み Webhook へテスト通知を送信できます。テスト通知は `Off` でも明示操作として送信可能です。
 
+PR #26 では件数異常時の通知に、前回正常件数・今回件数・比率・70%閾値・ページ数（参考）・次回 Retry を表示するよう変更しています。
+
 現状、成功通知には Artist Watch 新規一致件数を独立集計して含めていません。
+
+### 2.8 スクレイピング件数安全装置（PR #26、未マージ）
+
+DISCAS 側の HTML 変更や一時的な異常により、完全性検証をすり抜けた不自然に小さいスナップショットを DB へ反映しないための防御です。
+
+判定:
+
+- **0件取得は常に異常**。初回取得でも受け入れない
+- 同カテゴリの「最後に DB 反映まで成功した `ScrapeRun`」を正常基準とする
+- 今回件数が正常基準の **70%未満** なら `CountDrop` 異常
+- **70%ちょうどは正常**
+- 判定は整数演算 `current * 100 < previous * 70` で行う
+- 過去の正常 Run がない場合は、0件でなければ最初の正常基準として受け入れる
+- PageCount は異常判定には使わず、履歴・通知・確認 UI の参考情報として記録する
+- 異常として拒否した Run は次回の基準値にしない
+
+失敗分類:
+
+- `ScrapeFailureType.ProcessingError`
+- `ScrapeFailureType.AbnormalCount`
+  - `AbnormalCountReason.ZeroCount`
+  - `AbnormalCountReason.CountDrop`
+
+件数異常は通常失敗と同様に既存 Retry へ流します。
+
+- 通常失敗 → 3時間後 Retry #1
+- Retry #1 も異常 → 翌日 Retry #2
+- Retry #2 も異常 → 自動 Retry 終了
+- Retry だから閾値を緩めたり、同じ異常値が続いたから自動承認したりしない
+
+正当な大幅減少を人間が確認した場合:
+
+- `/settings` で Upcoming / New ごとに「次回1回だけ急減を許可」できる
+- 確認画面にカテゴリ、正常基準件数・ページ数、直近異常件数・ページ数・発生日時を表示
+- Override は **70%未満の急減だけ**を許可し、0件は常に拒否
+- Override は SQLite の `ScrapeGuardSettings` にカテゴリ別で永続化
+- 有効日時も保存・表示
+- 未消費なら手動取消可能
+- 許可確定後は対象カテゴリだけを `CategoryScrape` ManualWork へ即時 enqueue
+- 通信・解析・DB反映失敗では Override を消費しない
+- 完全スナップショットの DB 反映成功後にだけ Override を消費する
+- Override を使って成功した Run は `CountDropOverrideUsed=true` として履歴に残す
+- 成功すればそのカテゴリの既存 Pending Retry は通常どおり cancel する
+
+この機能は既存の `DiscasRequestThrottle` や HTML アクセス直列化を変更しません。
 
 ## 3. Web UI の現在地
 
@@ -261,6 +309,8 @@ DISCAS CD レンタル区分は現在日付と RentalStartDate から動的計�
 - 0～90 日: 新作
 - 91～180 日: 準新作
 - 181 日～: 旧作
+
+PR #26 では `/settings` に件数安全装置の状態・急減許可 UI、`/operations` に PageCount・失敗分類・Override 使用履歴表示を追加しています。
 
 ## 4. 最重要: DISCAS アクセス負荷制御
 
@@ -320,13 +370,16 @@ Artist Catalog membership は通常 Source / Archive lifecycle と独立です�
 
 ## 6. 未実装・今後の候補
 
-現時点で主要なバックエンドと日常操作 UI はかなり揃っています。次のセッションでは main の実装と Issue / PR 状態を確認してから優先順位を決めてください。
+主要なバックエンドと日常操作 UI はかなり揃っています。
 
-既知の候補:
+現在の最優先:
+
+- **PR #26 `Add scrape count anomaly guard` の CI / レビュー / マージ確認**
+
+その後の候補:
 
 - Discord 成功通知へ Artist Watch 新規一致件数を含めるか検討
 - UI の最終的な見た目・操作性調整
-- 異常クロール検出の閾値具体化（総件数の急減等）
 - 必要に応じて運用テスト・E2E の追加
 - ドキュメントと実装の継続同期
 
@@ -337,6 +390,7 @@ Artist Catalog membership は通常 Source / Archive lifecycle と独立です�
 - `main` はアプリケーションコード
 - `docs` は設計・調査資料専用の orphan branch
 - 機能変更は原則 feature branch → PR → CI → ユーザーが確認して merge
+- **`docs` branch のドキュメント更新は PR 不要で直接 commit してよい**
 - ユーザーから明示されない限り PR を勝手に merge しない
 - GitHub へファイルを書き込む前に必ず対象 branch を作成・確認し、write API には branch を明示する
 - 過去に誤って `main` へ直接 commit した事故があったため、default branch への暗黙書き込みは禁止
@@ -360,5 +414,6 @@ Artist Catalog membership は通常 Source / Archive lifecycle と独立です�
 - #22 Discord scrape notifications
 - #23 Discord test notification
 - #24 複数 CD の一括「借りた」操作
+- #26 scrape count anomaly guard — **open / 未マージ**
 
-**#24 まで main へ merge 済み**です。
+**#24 まで main へ merge 済み**です。#26 は feature branch `feature/scrape-count-anomaly-guard` から main への PR として確認中です。
