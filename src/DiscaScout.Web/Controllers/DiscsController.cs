@@ -18,6 +18,8 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
     public async Task<IActionResult> Index(
         [FromQuery(Name = "tab")] string tab = "unchecked",
         [FromQuery(Name = "title")] string? titleSearch = null,
+        [FromQuery(Name = "searchDescription")] bool searchDescription = false,
+        [FromQuery(Name = "searchTracks")] bool searchTracks = false,
         [FromQuery(Name = "artist")] string? artistSearch = null,
         [FromQuery(Name = "genre")] string? genre = null,
         [FromQuery(Name = "excludeMaxi")] bool excludeMaxi = false,
@@ -40,7 +42,7 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
             .Include(x => x.ArtistMatches).ThenInclude(x => x.ArtistSetting)
             .AsQueryable();
         query = ApplyTab(query, tab, HasSearchFilters(titleSearch, artistSearch, genre, excludeMaxi, excludeAlbum));
-        query = ApplySearch(query, titleSearch, artistSearch, genre);
+        query = ApplySearch(query, titleSearch, searchDescription, searchTracks, artistSearch, genre);
         query = ApplyFormatFilter(query, excludeMaxi, excludeAlbum);
         query = ApplyRentalFilter(query, rental);
         query = ApplySort(query, sort);
@@ -54,6 +56,8 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
         {
             Tab = tab,
             TitleSearch = titleSearch,
+            SearchDescription = searchDescription,
+            SearchTracks = searchTracks,
             ArtistSearch = artistSearch,
             Genre = genre,
             ExcludeMaxi = excludeMaxi,
@@ -224,12 +228,25 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
     private static System.Linq.Expressions.Expression<Func<Disc, bool>> IsUnchecked() =>
         x => x.NeedsReview && !x.IsRented && (!x.IsArchived || x.ArtistCatalogEntries.Any(c => c.IsActive));
 
-    private static IQueryable<Disc> ApplySearch(IQueryable<Disc> query, string? titleSearch, string? artistSearch, string? genre)
+    private static IQueryable<Disc> ApplySearch(
+        IQueryable<Disc> query,
+        string? titleSearch,
+        bool searchDescription,
+        bool searchTracks,
+        string? artistSearch,
+        string? genre)
     {
         foreach (var term in SplitTerms(titleSearch))
         {
+            var rawTerm = term;
             var normalized = DiscTextNormalizer.Normalize(term);
-            query = query.Where(x => x.NormalizedTitle.Contains(normalized));
+
+            // タイトル検索の既存AND条件を維持したまま、指定された補完情報を各キーワードの検索対象へ加える。
+            // 詳細・曲目は検索専用の正規化列を持たないため、保存済み表示文字列へ部分一致させる。
+            query = query.Where(x =>
+                x.NormalizedTitle.Contains(normalized)
+                || (searchDescription && x.Description != null && x.Description.Contains(rawTerm))
+                || (searchTracks && x.Tracks.Any(track => track.Title.Contains(rawTerm))));
         }
         foreach (var term in SplitTerms(artistSearch))
         {
