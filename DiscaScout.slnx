@@ -1,8 +1,10 @@
 <Solution>
+  <Project Path="src/DiscaScout.Application/DiscaScout.Application.csproj" />
   <Project Path="src/DiscaScout.Core/DiscaScout.Core.csproj" />
   <Project Path="src/DiscaScout.Persistence/DiscaScout.Persistence.csproj" />
   <Project Path="src/DiscaScout.Scraping/DiscaScout.Scraping.csproj" />
   <Project Path="src/DiscaScout.ScraperProbe/DiscaScout.ScraperProbe.csproj" />
+  <Project Path="tests/DiscaScout.Application.Tests/DiscaScout.Application.Tests.csproj" />
   <Project Path="tests/DiscaScout.Persistence.Tests/DiscaScout.Persistence.Tests.csproj" />
   <Project Path="tests/DiscaScout.Scraping.Tests/DiscaScout.Scraping.Tests.csproj" />
 </Solution>
