@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 namespace DiscaScout.Persistence;
 
 /// <summary>
-/// スクレイピング実行履歴とリトライ予定の永続化境界
+/// スクレイピング実行履歴とリトライ予定を更新する永続化境界
 /// </summary>
 public interface IScrapeOperationsStore
 {
@@ -13,14 +13,21 @@ public interface IScrapeOperationsStore
     Task CancelPendingRetriesAsync(ScrapeCategory category, DateTimeOffset resolvedAt, CancellationToken cancellationToken = default);
     Task CompleteRetryAsync(long retryId, DateTimeOffset resolvedAt, CancellationToken cancellationToken = default);
     Task<ScrapeRetry?> GetNextDueRetryAsync(DateTimeOffset now, CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Web運用画面で表示するスクレイピング状態を読み取る境界
+/// </summary>
+public interface IScrapeOperationsQueryStore
+{
     Task<IReadOnlyList<ScrapeRun>> GetRecentRunsAsync(int count, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ScrapeRetry>> GetPendingRetriesAsync(CancellationToken cancellationToken = default);
 }
 
 /// <summary>
-/// EF Coreを使用して実行履歴とリトライ予定をSQLiteへ保存する
+/// EF Coreを使用して実行履歴とリトライ予定をSQLiteへ保存・照会する
 /// </summary>
-public sealed class ScrapeOperationsStore(DiscaScoutDbContext dbContext) : IScrapeOperationsStore
+public sealed class ScrapeOperationsStore(DiscaScoutDbContext dbContext) : IScrapeOperationsStore, IScrapeOperationsQueryStore
 {
     /// <inheritdoc />
     public async Task AddRunAsync(ScrapeRun run, CancellationToken cancellationToken = default)
