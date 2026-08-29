@@ -22,12 +22,12 @@ public sealed class Disc
     public string? ImageUrl { get; set; }
     public string? ImagePath { get; set; }
     public DateOnly? RentalStartDate { get; set; }
-    public DateTimeOffset FirstSeenAt { get; set; }
-    public DateTimeOffset LastSeenAt { get; set; }
-    public DateTimeOffset LastUpdatedAt { get; set; }
+    public DateTime FirstSeenAt { get; set; }
+    public DateTime LastSeenAt { get; set; }
+    public DateTime LastUpdatedAt { get; set; }
     public bool IsArchived { get; set; }
     public bool NeedsReview { get; set; }
-    public DateTimeOffset? LastReviewedAt { get; set; }
+    public DateTime? LastReviewedAt { get; set; }
     public bool IsRented { get; set; }
     public List<DiscSource> Sources { get; } = [];
     public List<DiscReviewReason> ReviewReasons { get; } = [];
@@ -48,7 +48,7 @@ public sealed class DiscSource
     public int SourceRank { get; set; }
     public bool IsActive { get; set; }
     public int MissingCount { get; set; }
-    public DateTimeOffset LastSeenAt { get; set; }
+    public DateTime LastSeenAt { get; set; }
 }
 
 /// <summary>
@@ -60,7 +60,7 @@ public sealed class DiscReviewReason
     public long DiscId { get; set; }
     public Disc Disc { get; set; } = null!;
     public DiscReviewReasonType Reason { get; set; }
-    public DateTimeOffset CreatedAt { get; set; }
+    public DateTime CreatedAt { get; set; }
 }
 
 /// <summary>
@@ -74,7 +74,7 @@ public sealed class DiscChangeHistory
     public required string Field { get; set; }
     public string? OldValue { get; set; }
     public string? NewValue { get; set; }
-    public DateTimeOffset ChangedAt { get; set; }
+    public DateTime ChangedAt { get; set; }
 }
 
 /// <summary>
