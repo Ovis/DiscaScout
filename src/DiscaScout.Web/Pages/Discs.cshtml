@@ -23,9 +23,10 @@
         .tabs a.active { background: #273142; color: white; }
         .filters { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; background: white; border: 1px solid #dfe3e8; border-radius: 9px; padding: 12px; margin-bottom: 12px; }
         label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 650; }
+        label.checkbox { flex-direction: row; align-items: center; gap: 5px; padding-bottom: 8px; white-space: nowrap; }
         input[type=text], select { padding: 8px; border: 1px solid #c9ced6; border-radius: 6px; background: white; }
         input[type=text] { width: 230px; }
-        select.genre { min-width: 220px; }
+        select.genre { min-width: 180px; }
         button { border: 0; border-radius: 6px; padding: 8px 12px; background: #273142; color: white; font-weight: 650; cursor: pointer; }
         button.secondary { background: #5f6b7a; }
         button.rented { background: #7b3fa1; }
@@ -107,6 +108,8 @@
                 }
             </select>
         </label>
+        <label class="checkbox"><input type="checkbox" name="excludeMaxi" value="true" checked="@Model.ExcludeMaxi" /> MAXIを除外</label>
+        <label class="checkbox"><input type="checkbox" name="excludeAlbum" value="true" checked="@Model.ExcludeAlbum" /> アルバムを除外</label>
         <label>レンタル状態
             <select name="rental">
                 <option value="all" selected="@(Model.Rental == "all")">すべて</option>
