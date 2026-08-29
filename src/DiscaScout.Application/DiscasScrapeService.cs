@@ -8,7 +8,8 @@ namespace DiscaScout.Application;
 /// </summary>
 public sealed class DiscasScrapeService(
     IDiscasCategoryCrawler crawler,
-    IDiscasSnapshotStore snapshotStore)
+    IDiscasSnapshotStore snapshotStore,
+    DiscImageCacheService? imageCache = null)
 {
     private static readonly DiscSourceCategory[] DefaultCategories =
     [
@@ -54,6 +55,7 @@ public sealed class DiscasScrapeService(
                 cancellationToken);
 
             var applyResult = await snapshotStore.ApplyAsync(snapshot, cancellationToken);
+            await TrySyncImagesAsync(snapshot.Products.Select(x => x.DiscasId), cancellationToken);
 
             return CategoryScrapeResult.Success(
                 category,
@@ -71,6 +73,29 @@ public sealed class DiscasScrapeService(
             // NewとUpcomingは独立したコミット単位であるため、片方の失敗で他方まで中止しない。
             // 詳細な例外情報は後続のログ基盤へ流し、実行結果には利用者向けの短い理由だけ保持する。
             return CategoryScrapeResult.Failure(category, ex.Message);
+        }
+    }
+
+    private async Task TrySyncImagesAsync(IEnumerable<string> discasIds, CancellationToken cancellationToken)
+    {
+        if (imageCache is null)
+        {
+            return;
+        }
+
+        try
+        {
+            // 画像はカテゴリスナップショットとは独立した副次データなので、DB反映後に同期する。
+            // 保存先障害など画像同期全体が失敗しても、既に確定した正常なカテゴリ取得を失敗扱いにしない。
+            await imageCache.SyncAsync(discasIds, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            // 画像同期は次回実行で再試行できる。ScrapeRunの成否はDISCAS検索結果とSQLite反映を基準にする。
         }
     }
 }
