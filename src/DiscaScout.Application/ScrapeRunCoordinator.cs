@@ -46,6 +46,16 @@ public sealed class ScrapeRunCoordinator(
     }
 
     /// <summary>
+    /// 指定カテゴリだけを手動取得として実行する
+    /// </summary>
+    public Task<CategoryScrapeResult> ExecuteManualCategoryAsync(
+        ScrapeCategory category,
+        CancellationToken cancellationToken = default)
+    {
+        return ExecuteAndRecordAsync(MapCategory(category), ScrapeExecutionType.Manual, retry: null, cancellationToken);
+    }
+
+    /// <summary>
     /// 期限到来済みのリトライ予定を1件実行する
     /// </summary>
     public Task<CategoryScrapeResult> ExecuteRetryAsync(ScrapeRetry retry, CancellationToken cancellationToken = default)
@@ -81,9 +91,13 @@ public sealed class ScrapeRunCoordinator(
             IsSuccess = result.IsSuccess,
             FetchedCount = result.TotalCount,
             ParsedCount = result.TotalCount,
+            PageCount = result.PageCount,
             AddedCount = result.AddedCount,
             UpdatedCount = result.UpdatedCount,
             DeactivatedSourceCount = result.DeactivatedSourceCount,
+            FailureType = result.FailureType,
+            AbnormalCountReason = result.AbnormalCountReason,
+            CountDropOverrideUsed = result.CountDropOverrideUsed,
             FailureReason = result.IsSuccess ? null : TruncateFailureReason(result.ErrorMessage)
         };
 
