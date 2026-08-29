@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="src/DiscaScout.Scraping/DiscaScout.Scraping.csproj" />
+  <Project Path="src/DiscaScout.ScraperProbe/DiscaScout.ScraperProbe.csproj" />
+  <Project Path="tests/DiscaScout.Scraping.Tests/DiscaScout.Scraping.Tests.csproj" />
+</Solution>
