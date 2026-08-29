@@ -25,14 +25,16 @@ public sealed class DiscasCategoryCrawler
     /// 指定カテゴリを先頭ページから最終ページまで取得する
     /// </summary>
     /// <param name="category">取得対象カテゴリ</param>
+    /// <param name="onPageFetched">HTTP取得直後、HTML解析前に呼び出す任意のコールバック。PoCで生HTMLを保存する用途などに使用する</param>
     /// <param name="cancellationToken">取得処理を中断するためのトークン</param>
     /// <returns>カテゴリ全体の商品スナップショット</returns>
     /// <exception cref="DiscasCategoryCrawlException">HTTP取得、解析、件数整合性の検証に失敗した場合</exception>
     public async Task<DiscasCategorySnapshot> CrawlAsync(
         DiscSourceCategory category,
+        Func<DiscasFetchedPage, CancellationToken, ValueTask>? onPageFetched = null,
         CancellationToken cancellationToken = default)
     {
-        var firstPage = await FetchAndParsePageAsync(category, 1, 0, cancellationToken);
+        var firstPage = await FetchAndParsePageAsync(category, 1, 0, onPageFetched, cancellationToken);
         if (firstPage.Products.Count == 0)
         {
             throw new DiscasCategoryCrawlException(category, "1ページ目の商品件数が0件だった");
@@ -57,6 +59,7 @@ public sealed class DiscasCategoryCrawler
                 category,
                 pageNumber,
                 products.Count,
+                onPageFetched,
                 cancellationToken);
 
             if (page.TotalCount != totalCount)
@@ -98,10 +101,20 @@ public sealed class DiscasCategoryCrawler
         DiscSourceCategory category,
         int pageNumber,
         int sourceRankOffset,
+        Func<DiscasFetchedPage, CancellationToken, ValueTask>? onPageFetched,
         CancellationToken cancellationToken)
     {
         var uri = DiscasSearchTarget.CreateUri(category, pageNumber);
         var fetchResult = await pageFetcher.FetchAsync(uri, cancellationToken);
+
+        // PoCでは解析失敗時の実HTMLを確認できるよう、解析処理より前に取得結果を外部へ渡す。
+        // 本番コードではコールバックを指定しなければ追加処理は発生しない。
+        if (onPageFetched is not null)
+        {
+            await onPageFetched(
+                new DiscasFetchedPage(category, pageNumber, fetchResult.FinalUri, fetchResult.Html),
+                cancellationToken);
+        }
 
         if (fetchResult.StatusCode is < HttpStatusCode.OK or >= HttpStatusCode.MultipleChoices)
         {
@@ -147,6 +160,19 @@ public sealed class DiscasCategoryCrawler
         }
     }
 }
+
+/// <summary>
+/// HTTP取得直後、HTML解析前のDISCAS検索結果ページを保持する
+/// </summary>
+/// <param name="Category">取得対象カテゴリ</param>
+/// <param name="PageNumber">1始まりのページ番号</param>
+/// <param name="Uri">リダイレクト後の最終URL</param>
+/// <param name="Html">デコード済みHTML本文</param>
+public sealed record DiscasFetchedPage(
+    DiscSourceCategory Category,
+    int PageNumber,
+    Uri Uri,
+    string Html);
 
 /// <summary>
 /// 1回の正常なカテゴリクロールで得られた完全な商品一覧を保持する
