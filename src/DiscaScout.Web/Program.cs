@@ -19,10 +19,12 @@ builder.Services.AddRazorPages();
 builder.Services.AddDbContext<DiscaScoutDbContext>(options =>
     options.UseSqlite($"Data Source={databasePath}"));
 
-// DISCASへの全HTTPアクセスで同じ排他・2秒間隔を共有する。
-// Crawler単位でFetcherが別インスタンスになっても相手サーバーへの並列アクセスを発生させない。
+// 検索HTMLはCategory/Artist Catalogをまたいで完全直列化し、最低2秒間隔と10ページごとの追加休止を共有する。
 builder.Services.AddSingleton<DiscasRequestThrottle>();
 builder.Services.AddHttpClient<DiscasPageFetcher>();
+
+// ジャケット画像は検索HTMLとは独立したBackgroundServiceで最大4並列取得する。
+// 画像取得を検索処理の完了条件に含めず、一覧データを先に利用可能にする。
 builder.Services.AddHttpClient("disc-image-cache");
 builder.Services.AddScoped<DiscasSearchResultParser>();
 builder.Services.AddScoped<DiscasCategoryCrawler>();
@@ -48,15 +50,13 @@ builder.Services.AddScoped<ScrapeRunCoordinator>();
 builder.Services.AddSingleton<ScrapeExecutionGate>();
 builder.Services.AddSingleton<ManualWorkSignal>();
 builder.Services.AddHostedService<ScrapeBackgroundService>();
+builder.Services.AddHostedService<DiscImageCacheBackgroundService>();
 
 var app = builder.Build();
 
 await using (var scope = app.Services.CreateAsyncScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<DiscaScoutDbContext>();
-
-    // 永続DBを破棄せず今後のスキーマ変更を適用できるよう、起動時はMigrationを前進適用する。
-    // 単一インスタンス運用を前提としているため、同じSQLite DBへ複数ホストが同時Migrationする構成は採らない。
     await dbContext.Database.MigrateAsync();
 }
 
@@ -83,7 +83,6 @@ app.MapGet("/disc-image/{id:long}", async (long id, DiscaScoutDbContext dbContex
         _ => "image/jpeg"
     };
 
-    // DBに保存済みのキャッシュファイルだけをID経由で返し、任意パスをURLから指定できないようにする。
     return Results.File(imagePath, contentType, enableRangeProcessing: false);
 });
 app.MapRazorPages();
