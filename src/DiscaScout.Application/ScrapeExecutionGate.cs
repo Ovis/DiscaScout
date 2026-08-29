@@ -6,6 +6,16 @@ namespace DiscaScout.Application;
 public sealed class ScrapeExecutionGate
 {
     private readonly SemaphoreSlim gate = new(1, 1);
+    private int isRunning;
+
+    /// <summary>
+    /// 通常カテゴリ取得またはArtist Catalog取得が現在実行中かどうかを返す
+    /// </summary>
+    /// <remarks>
+    /// 詳細メタデータ補完は通常クロールを遅くしないことを優先するため、この状態を見て自主的に待機する。
+    /// 実際のDISCAS HTTP排他は別途DiscasRequestThrottleが保証する。
+    /// </remarks>
+    public bool IsRunning => Volatile.Read(ref isRunning) != 0;
 
     /// <summary>
     /// 他のスクレイピングが動いていない場合だけ処理を開始する
@@ -28,12 +38,14 @@ public sealed class ScrapeExecutionGate
             return null;
         }
 
+        Volatile.Write(ref isRunning, 1);
         try
         {
             return await action(cancellationToken);
         }
         finally
         {
+            Volatile.Write(ref isRunning, 0);
             gate.Release();
         }
     }
