@@ -30,9 +30,14 @@ if (crawlMode)
     Console.WriteLine($"Pages: {snapshot.PageCount:N0}");
     Console.WriteLine($"Parsed products: {snapshot.Products.Count:N0}");
 
+    foreach (var genre in snapshot.Products.GroupBy(x => x.GenreLarge).OrderByDescending(x => x.Count()))
+    {
+        Console.WriteLine($"Genre: {genre.Key} = {genre.Count():N0}");
+    }
+
     foreach (var product in snapshot.Products.Take(10))
     {
-        Console.WriteLine($"#{product.SourceRank} [{product.DiscasId}] {product.Title} / {product.Artist}");
+        Console.WriteLine($"#{product.SourceRank} [{product.DiscasId}] {product.Title} / {product.Artist} / {product.GenreLarge}");
     }
 
     return 0;
@@ -69,6 +74,7 @@ Console.WriteLine($"Product IDs match hidden IDs: {hiddenIdsMatch}");
 foreach (var product in page.Products.Take(10))
 {
     Console.WriteLine($"#{product.SourceRank} [{product.DiscasId}] {product.Title} / {product.Artist}");
+    Console.WriteLine($"  Genre: {product.GenreLarge} / {product.GenreMiddle ?? "(none)"} / {product.GenreSmall ?? "(none)"}");
     Console.WriteLine($"  URL: {product.ProductUrl}");
     Console.WriteLine($"  Image: {product.ImageUrl ?? "(none)"}");
 }
