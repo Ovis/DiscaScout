@@ -28,6 +28,7 @@
         button.primary { background: #165dce; }
         button.secondary { background: #5f6b7a; }
         button.archive { background: #8b3b3b; }
+        button:disabled { cursor: default; opacity: .55; }
         table { width: 100%; border-collapse: collapse; font-size: 13px; }
         th, td { padding: 10px 8px; border-bottom: 1px solid #e6e9ed; text-align: left; vertical-align: middle; }
         th { color: #5a6470; white-space: nowrap; }
@@ -37,13 +38,14 @@
         .count { white-space: nowrap; color: #68707c; }
         .archived { opacity: .62; }
         .actions { display: flex; gap: 6px; margin-top: 6px; }
+        .work { display: inline-block; margin-left: 6px; padding: 2px 6px; border-radius: 999px; background: #eef4ff; color: #165dce; font-size: 11px; font-weight: 700; }
     </style>
 </head>
 <body>
 <main>
     <nav><a href="/discs">CD一覧</a><a href="/artists">Artist設定</a><a href="/operations">運用</a></nav>
     <h1>Artist設定</h1>
-    <div class="muted">新着Watchと全作品収集は同じArtist設定を共有します。全作品収集は手動実行時のみDISCASへアクセスします。</div>
+    <div class="muted">新着Watchと全作品収集は同じArtist設定を共有します。全作品収集はバックグラウンドで実行します。</div>
 
     @if (!string.IsNullOrWhiteSpace(Model.StatusMessage))
     {
@@ -80,22 +82,34 @@
                 <tbody>
                 @foreach (var setting in Model.Settings)
                 {
+                    var catalogWorkActive = Model.ActiveCatalogSettingIds.Contains(setting.Id);
                     <tr class="@(setting.IsArchived ? "archived" : "")">
                         <td>
                             @if (!setting.IsArchived)
                             {
                                 <form method="post" asp-page-handler="Update" class="setting-form">
                                     <input type="hidden" name="id" value="@setting.Id" />
-                                    <input type="text" name="artist" value="@setting.Artist" required />
-                                    <select name="matchType">
+                                    <input type="text" name="artist" value="@setting.Artist" required disabled="@catalogWorkActive" />
+                                    <select name="matchType" disabled="@catalogWorkActive">
                                         @if (setting.MatchType == ArtistMatchType.Exact) { <option value="Exact" selected>完全一致</option><option value="Contains">部分一致</option> }
                                         else { <option value="Exact">完全一致</option><option value="Contains" selected>部分一致</option> }
                                     </select>
-                                    <label class="check"><input type="checkbox" name="isWatchEnabled" value="true" checked="@setting.IsWatchEnabled" /> Watch</label>
-                                    <label class="check"><input type="checkbox" name="collectFullCatalog" value="true" checked="@setting.CollectFullCatalog" /> 全作品</label>
-                                    <label class="check"><input type="checkbox" name="reopenExistingReviewedMatches" value="true" /> 既存を再確認</label>
-                                    <button type="submit">保存</button>
+                                    <label class="check"><input type="checkbox" name="isWatchEnabled" value="true" checked="@setting.IsWatchEnabled" disabled="@catalogWorkActive" /> Watch</label>
+                                    <label class="check"><input type="checkbox" name="collectFullCatalog" value="true" checked="@setting.CollectFullCatalog" disabled="@catalogWorkActive" /> 全作品</label>
+                                    <label class="check"><input type="checkbox" name="reopenExistingReviewedMatches" value="true" disabled="@catalogWorkActive" /> 既存を再確認</label>
+                                    @if (catalogWorkActive)
+                                    {
+                                        <button type="submit" disabled>処理中</button>
+                                    }
+                                    else
+                                    {
+                                        <button type="submit">保存</button>
+                                    }
                                 </form>
+                                @if (catalogWorkActive)
+                                {
+                                    <span class="work">全作品収集 待機中 / 実行中</span>
+                                }
                             }
                             else
                             {
@@ -108,11 +122,31 @@
                             <div class="actions">
                                 @if (!setting.IsArchived && setting.CollectFullCatalog)
                                 {
-                                    <form method="post" asp-page-handler="Collect"><input type="hidden" name="id" value="@setting.Id" /><button class="secondary" type="submit">全作品を再取得</button></form>
+                                    <form method="post" asp-page-handler="Collect">
+                                        <input type="hidden" name="id" value="@setting.Id" />
+                                        @if (catalogWorkActive)
+                                        {
+                                            <button class="secondary" type="submit" disabled>全作品を再取得</button>
+                                        }
+                                        else
+                                        {
+                                            <button class="secondary" type="submit">全作品を再取得</button>
+                                        }
+                                    </form>
                                 }
                                 @if (!setting.IsArchived)
                                 {
-                                    <form method="post" asp-page-handler="Archive"><input type="hidden" name="id" value="@setting.Id" /><button class="archive" type="submit">アーカイブ</button></form>
+                                    <form method="post" asp-page-handler="Archive">
+                                        <input type="hidden" name="id" value="@setting.Id" />
+                                        @if (catalogWorkActive)
+                                        {
+                                            <button class="archive" type="submit" disabled>アーカイブ</button>
+                                        }
+                                        else
+                                        {
+                                            <button class="archive" type="submit">アーカイブ</button>
+                                        }
+                                    </form>
                                 }
                                 else
                                 {
