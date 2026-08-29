@@ -88,10 +88,10 @@ public sealed class DiscasSearchResultParserTests
     }
 
     /// <summary>
-    /// アーティスト表示そのものが欠落した商品を正常データとして扱わないことを確認する
+    /// DISCAS側にアーティスト表示がない商品は欠損値として保持できることを確認する
     /// </summary>
     [Fact]
-    public void Parse_ProductWithoutArtistDisplay_ThrowsParseException()
+    public void Parse_ProductWithoutArtistDisplay_ReturnsNullArtist()
     {
         const string html = """
             <div class="cd-product-item">
@@ -105,10 +105,10 @@ public sealed class DiscasSearchResultParserTests
             """;
         var parser = new DiscasSearchResultParser();
 
-        var exception = Assert.Throws<DiscasSearchParseException>(
-            () => parser.Parse(html, PageUri, DiscSourceCategory.New));
+        var result = parser.Parse(html, PageUri, DiscSourceCategory.New);
 
-        Assert.Contains("アーティスト表示", exception.Message);
+        Assert.Single(result.Products);
+        Assert.Null(result.Products[0].Artist);
     }
 
     /// <summary>
