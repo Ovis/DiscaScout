@@ -7,11 +7,13 @@ using Microsoft.EntityFrameworkCore;
 var builder = WebApplication.CreateBuilder(args);
 
 var databasePath = builder.Configuration["DiscaScout:DatabasePath"] ?? "data/discascout.db";
+var imageCachePath = builder.Configuration["DiscaScout:ImageCachePath"] ?? "data/images";
 var databaseDirectory = Path.GetDirectoryName(Path.GetFullPath(databasePath));
 if (!string.IsNullOrEmpty(databaseDirectory))
 {
     Directory.CreateDirectory(databaseDirectory);
 }
+Directory.CreateDirectory(Path.GetFullPath(imageCachePath));
 
 builder.Services.AddRazorPages();
 builder.Services.AddDbContext<DiscaScoutDbContext>(options =>
@@ -21,6 +23,7 @@ builder.Services.AddDbContext<DiscaScoutDbContext>(options =>
 // Crawler単位でFetcherが別インスタンスになっても相手サーバーへの並列アクセスを発生させない。
 builder.Services.AddSingleton<DiscasRequestThrottle>();
 builder.Services.AddHttpClient<DiscasPageFetcher>();
+builder.Services.AddHttpClient("disc-image-cache");
 builder.Services.AddScoped<DiscasSearchResultParser>();
 builder.Services.AddScoped<DiscasCategoryCrawler>();
 builder.Services.AddScoped<IDiscasCategoryCrawler>(sp => sp.GetRequiredService<DiscasCategoryCrawler>());
@@ -30,6 +33,10 @@ builder.Services.AddScoped<DiscasSnapshotApplier>();
 builder.Services.AddScoped<IDiscasSnapshotStore, DiscasSnapshotStore>();
 builder.Services.AddScoped<ArtistWatchService>();
 builder.Services.AddScoped<ArtistCatalogStore>();
+builder.Services.AddScoped(sp => new DiscImageCacheService(
+    sp.GetRequiredService<DiscaScoutDbContext>(),
+    sp.GetRequiredService<IHttpClientFactory>().CreateClient("disc-image-cache"),
+    Path.GetFullPath(imageCachePath)));
 builder.Services.AddScoped<ArtistCatalogCollectionService>();
 builder.Services.AddScoped<ScrapeOperationsStore>();
 builder.Services.AddScoped<IScrapeOperationsStore>(sp => sp.GetRequiredService<ScrapeOperationsStore>());
