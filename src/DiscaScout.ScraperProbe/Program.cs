@@ -27,7 +27,7 @@ Console.WriteLine($"Final URI: {result.FinalUri}");
 Console.WriteLine($"Charset: {result.Charset ?? "(not specified)"}");
 Console.WriteLine($"HTML length: {result.Html.Length:N0}");
 
-var outputDirectory = Path.Combine(Environment.CurrentDirectory, "probe-output");
+var outputDirectory = Path.Combine(Environment.CurrentDirectory, "artifacts", "probe");
 Directory.CreateDirectory(outputDirectory);
 var outputPath = Path.Combine(outputDirectory, "search-result.html");
 await File.WriteAllTextAsync(outputPath, result.Html);
