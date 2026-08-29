@@ -159,6 +159,7 @@ public sealed class DiscasSnapshotApplier(DiscaScoutDbContext dbContext, TimePro
             GenreSmall = scraped.GenreSmall,
             ImageUrl = scraped.ImageUrl,
             RentalStartDate = scraped.RentalStartDate,
+            IsMaxiSingle = scraped.IsMaxiSingle,
             FirstSeenAt = now,
             LastSeenAt = now,
             LastUpdatedAt = now,
@@ -211,8 +212,11 @@ public sealed class DiscasSnapshotApplier(DiscaScoutDbContext dbContext, TimePro
         changed |= AssignIfChanged(disc.GenreMiddle, scraped.GenreMiddle, x => disc.GenreMiddle = x);
         changed |= AssignIfChanged(disc.GenreSmall, scraped.GenreSmall, x => disc.GenreSmall = x);
         changed |= AssignIfChanged(disc.ImageUrl, scraped.ImageUrl, x => disc.ImageUrl = x);
+        changed |= AssignIfChanged(disc.IsMaxiSingle, scraped.IsMaxiSingle, x => disc.IsMaxiSingle = x);
 
-        if (disc.RentalStartDate != scraped.RentalStartDate)
+        // RentalStartDateは一覧HTMLでは取得できないため、詳細ページで取得済みの値を
+        // nullで上書きしない。将来一覧側から値を取得できるようになった場合だけ更新する。
+        if (scraped.RentalStartDate is not null && disc.RentalStartDate != scraped.RentalStartDate)
         {
             disc.RentalStartDate = scraped.RentalStartDate;
             changed = true;
