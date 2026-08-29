@@ -87,8 +87,12 @@ public sealed class DiscasCategoryCrawlerTests
             products.Select(x => $"""
                 <div class="cd-product-item">
                   <div class="card-body-searchCd">
-                    <h3><a class="card-title-searchCd" href="goodsDetail.do?titleID={x.Id}">{x.Title}</a></h3>
-                    <h3><a href="artistsearchHmo.do?a=1">アーティスト{x.Id}</a></h3>
+                    <h3 class="cd-search-product-title">
+                      <a class="card-title-searchCd" href="goodsDetail.do?titleID={x.Id}">{x.Title}</a>
+                    </h3>
+                    <h3 class="cd-search-product-title">
+                      <a href="artistsearchHmo.do?a=1">アーティスト{x.Id}</a>
+                    </h3>
                   </div>
                   <img class="card-img" src="https://img.discas.net/img/jacket/{x.Id}.jpg">
                 </div>
