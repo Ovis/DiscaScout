@@ -37,9 +37,9 @@ public sealed class DiscImageCacheService
     }
 
     /// <summary>
-    /// テスト用に画像リクエスト開始間隔を指定して初期化する
+    /// 互換性維持およびテスト用に画像リクエスト開始間隔を指定して初期化する
     /// </summary>
-    internal DiscImageCacheService(
+    public DiscImageCacheService(
         DiscaScoutDbContext dbContext,
         HttpClient httpClient,
         string imageDirectory,
