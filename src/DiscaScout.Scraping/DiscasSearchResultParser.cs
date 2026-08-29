@@ -139,9 +139,13 @@ public sealed partial class DiscasSearchResultParser
         }
 
         var match = TotalCountRegex().Match(text);
-        return match.Success && int.TryParse(match.Groups[1].Value, out var totalCount)
-            ? totalCount
-            : null;
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        var normalizedCount = match.Groups[1].Value.Replace(",", string.Empty, StringComparison.Ordinal);
+        return int.TryParse(normalizedCount, out var totalCount) ? totalCount : null;
     }
 
     private static IReadOnlyList<string> ParseHiddenTitleIds(string? value)
