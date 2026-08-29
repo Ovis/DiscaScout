@@ -150,6 +150,7 @@ public sealed class ArtistCatalogStore(DiscaScoutDbContext dbContext, TimeProvid
             GenreSmall = scraped.GenreSmall,
             ImageUrl = scraped.ImageUrl,
             RentalStartDate = scraped.RentalStartDate,
+            IsMaxiSingle = scraped.IsMaxiSingle,
             FirstSeenAt = now,
             LastSeenAt = now,
             LastUpdatedAt = now,
@@ -180,7 +181,15 @@ public sealed class ArtistCatalogStore(DiscaScoutDbContext dbContext, TimeProvid
         disc.GenreMiddle = scraped.GenreMiddle;
         disc.GenreSmall = scraped.GenreSmall;
         disc.ImageUrl = scraped.ImageUrl;
-        disc.RentalStartDate = scraped.RentalStartDate;
+        disc.IsMaxiSingle = scraped.IsMaxiSingle;
+
+        // Artist Catalogの検索一覧でもレンタル開始日は取得できないため、
+        // 詳細ページから補完済みの値をnullで消さない。
+        if (scraped.RentalStartDate is not null)
+        {
+            disc.RentalStartDate = scraped.RentalStartDate;
+        }
+
         disc.LastSeenAt = now;
         disc.LastUpdatedAt = now;
     }
