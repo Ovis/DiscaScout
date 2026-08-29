@@ -79,7 +79,6 @@ public sealed class DiscsModel(DiscaScoutDbContext dbContext) : PageModel
         query = ApplyTab(query);
         query = ApplySearch(query);
         query = ApplyRentalFilter(query);
-        query = ApplySort(query);
 
         TotalCount = await query.CountAsync(cancellationToken);
         if (PageNumber > TotalPages)
@@ -87,10 +86,7 @@ public sealed class DiscsModel(DiscaScoutDbContext dbContext) : PageModel
             PageNumber = TotalPages;
         }
 
-        Items = await query
-            .Skip((PageNumber - 1) * PageSize)
-            .Take(PageSize)
-            .ToListAsync(cancellationToken);
+        Items = await LoadPageAsync(query, cancellationToken);
     }
 
     /// <summary>
@@ -193,15 +189,40 @@ public sealed class DiscsModel(DiscaScoutDbContext dbContext) : PageModel
         };
     }
 
-    private IQueryable<Disc> ApplySort(IQueryable<Disc> query)
+    /// <summary>
+    /// SQLiteで実行可能な並び順はDB側でページングし、DateTimeOffsetを含む並び順だけメモリ側で処理する
+    /// </summary>
+    private async Task<IReadOnlyList<Disc>> LoadPageAsync(
+        IQueryable<Disc> query,
+        CancellationToken cancellationToken)
     {
-        return Sort switch
+        if (Sort is "title" or "artist")
         {
-            "rental" => query.OrderByDescending(x => x.RentalStartDate).ThenByDescending(x => x.LastUpdatedAt),
-            "title" => query.OrderBy(x => x.NormalizedTitle).ThenBy(x => x.Id),
-            "artist" => query.OrderBy(x => x.NormalizedArtist).ThenBy(x => x.NormalizedTitle),
-            _ => query.OrderByDescending(x => x.LastUpdatedAt).ThenByDescending(x => x.Id)
-        };
+            var ordered = Sort == "title"
+                ? query.OrderBy(x => x.NormalizedTitle).ThenBy(x => x.Id)
+                : query.OrderBy(x => x.NormalizedArtist).ThenBy(x => x.NormalizedTitle);
+
+            return await ordered
+                .Skip((PageNumber - 1) * PageSize)
+                .Take(PageSize)
+                .ToListAsync(cancellationToken);
+        }
+
+        // SQLiteのEF CoreプロバイダーはDateTimeOffsetをORDER BYへ変換できない。
+        // 絞り込みはSQL側で行い、日時を含む最終ソートとページングだけをLINQ to Objectsへ切り替える。
+        // 現在のCD件数は数千件規模なので許容できるが、将来大幅に増える場合はUTC ticks等のソート専用列を検討する。
+        var candidates = await query.ToListAsync(cancellationToken);
+        IEnumerable<Disc> orderedCandidates = Sort == "rental"
+            ? candidates.OrderByDescending(x => x.RentalStartDate)
+                .ThenByDescending(x => x.LastUpdatedAt)
+                .ThenByDescending(x => x.Id)
+            : candidates.OrderByDescending(x => x.LastUpdatedAt)
+                .ThenByDescending(x => x.Id);
+
+        return orderedCandidates
+            .Skip((PageNumber - 1) * PageSize)
+            .Take(PageSize)
+            .ToList();
     }
 
     private void NormalizeInputs()
