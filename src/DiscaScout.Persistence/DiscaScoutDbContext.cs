@@ -14,6 +14,7 @@ public sealed class DiscaScoutDbContext(DbContextOptions<DiscaScoutDbContext> op
     public DbSet<DiscChangeHistory> DiscChangeHistory => Set<DiscChangeHistory>();
     public DbSet<ScrapeRun> ScrapeRuns => Set<ScrapeRun>();
     public DbSet<ScrapeRetry> ScrapeRetries => Set<ScrapeRetry>();
+    public DbSet<ScrapeScheduleSettings> ScrapeScheduleSettings => Set<ScrapeScheduleSettings>();
 
     /// <summary>
     /// ドメインモデルとSQLiteテーブルの制約・インデックスを構成する
@@ -77,5 +78,9 @@ public sealed class DiscaScoutDbContext(DbContextOptions<DiscaScoutDbContext> op
         scrapeRetry.HasKey(x => x.Id);
         scrapeRetry.HasIndex(x => new { x.Status, x.DueAt });
         scrapeRetry.HasIndex(x => new { x.Category, x.Status });
+
+        var schedule = modelBuilder.Entity<ScrapeScheduleSettings>();
+        schedule.HasKey(x => x.Id);
+        schedule.Property(x => x.Id).ValueGeneratedNever();
     }
 }
