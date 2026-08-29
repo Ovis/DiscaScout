@@ -13,10 +13,14 @@ public sealed class ManualWorkSignal
     public void Notify()
     {
         // 複数要求が短時間に登録されてもBackgroundServiceはDBキューを空になるまで処理するため、
-        // シグナル自体は1件分だけ保持すれば十分である。
-        if (semaphore.CurrentCount == 0)
+        // シグナル自体は1件分だけ保持すれば十分である。並行Notifyで既に上限へ達した場合も通知済みとして扱う。
+        try
         {
             semaphore.Release();
+        }
+        catch (SemaphoreFullException)
+        {
+            // 既に未消費の通知が1件あるため追加Releaseは不要
         }
     }
 
