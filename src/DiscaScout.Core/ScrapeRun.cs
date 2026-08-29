@@ -43,9 +43,25 @@ public sealed class ScrapeRun
     public bool IsSuccess { get; set; }
     public int? FetchedCount { get; set; }
     public int? ParsedCount { get; set; }
+
+    /// <summary>今回のクロールで取得したページ数。クロール完了前に失敗した場合はnull</summary>
+    public int? PageCount { get; set; }
+
     public int AddedCount { get; set; }
     public int UpdatedCount { get; set; }
     public int DeactivatedSourceCount { get; set; }
+
+    /// <summary>失敗時の大分類。成功時はNone</summary>
+    public ScrapeFailureType FailureType { get; set; }
+
+    /// <summary>件数異常の場合の詳細理由</summary>
+    public AbnormalCountReason? AbnormalCountReason { get; set; }
+
+    /// <summary>
+    /// 人間が明示的に許可した急減を使用して、このRunがDB反映まで成功したか
+    /// </summary>
+    public bool CountDropOverrideUsed { get; set; }
+
     public string? FailureReason { get; set; }
 }
 

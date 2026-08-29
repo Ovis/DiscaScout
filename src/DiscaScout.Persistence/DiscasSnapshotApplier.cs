@@ -15,10 +15,12 @@ public sealed class DiscasSnapshotApplier(DiscaScoutDbContext dbContext, TimePro
     /// 完全性検証済みのカテゴリスナップショットを1トランザクションで反映する
     /// </summary>
     /// <param name="snapshot">全ページ取得と整合性検証に成功したカテゴリスナップショット</param>
+    /// <param name="consumeCountDropOverride">今回の反映と同一トランザクションで急減許可を消費する場合はtrue</param>
     /// <param name="cancellationToken">DB反映処理を中断するためのトークン</param>
     /// <returns>今回の反映で新規追加・更新・非アクティブ化した件数</returns>
     public async Task<SnapshotApplyResult> ApplyAsync(
         DiscasCategorySnapshot snapshot,
+        bool consumeCountDropOverride = false,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
@@ -136,6 +138,22 @@ public sealed class DiscasSnapshotApplier(DiscaScoutDbContext dbContext, TimePro
             }
 
             disc.IsArchived = !disc.Sources.Any(x => x.IsActive);
+        }
+
+        if (consumeCountDropOverride)
+        {
+            // スナップショットだけコミットされてOverride消費に失敗すると、RetryでMissingCountを二重加算し得る。
+            // そのためOverrideの消費も同じトランザクションへ含め、両方が成功するか両方ともロールバックする。
+            var scrapeCategory = MapScrapeCategory(snapshot.Category);
+            var guard = await dbContext.ScrapeGuardSettings
+                .SingleOrDefaultAsync(x => x.Category == scrapeCategory, cancellationToken);
+            if (guard is null || !guard.IsCountDropOverrideEnabled)
+            {
+                throw new InvalidOperationException($"急減許可が有効ではないためスナップショットを反映できない: {scrapeCategory}");
+            }
+
+            guard.IsCountDropOverrideEnabled = false;
+            guard.CountDropOverrideEnabledAt = null;
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -267,6 +285,16 @@ public sealed class DiscasSnapshotApplier(DiscaScoutDbContext dbContext, TimePro
         {
             DiscSourceCategory.Upcoming => DiscReleaseCategory.Upcoming,
             DiscSourceCategory.New => DiscReleaseCategory.New,
+            _ => throw new ArgumentOutOfRangeException(nameof(category), category, null)
+        };
+    }
+
+    private static ScrapeCategory MapScrapeCategory(DiscSourceCategory category)
+    {
+        return category switch
+        {
+            DiscSourceCategory.Upcoming => ScrapeCategory.Upcoming,
+            DiscSourceCategory.New => ScrapeCategory.New,
             _ => throw new ArgumentOutOfRangeException(nameof(category), category, null)
         };
     }

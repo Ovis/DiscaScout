@@ -35,6 +35,7 @@
         th { color: #5a6470; font-weight: 650; white-space: nowrap; }
         .ok { color: #147a3d; font-weight: 700; }
         .ng { color: #b42318; font-weight: 700; }
+        .warn { color: #8a5a00; font-weight: 700; }
         .running { color: #165dce; font-weight: 700; }
         .pending { color: #8a5a00; font-weight: 700; }
         .error { color: #b42318; max-width: 360px; }
@@ -113,10 +114,10 @@
                     @foreach (var work in Model.ActiveManualWork)
                     {
                         <tr>
-                            <td>@(work.Type == ManualWorkType.FullScrape ? "通常取得" : "Artist全作品")</td>
+                            <td>@OperationsModel.GetManualWorkTypeLabel(work.Type)</td>
                             <td class="@(work.Status == ManualWorkStatus.Running ? "running" : "pending")">@(work.Status == ManualWorkStatus.Running ? "実行中" : "待機中")</td>
                             <td>@OperationsModel.ToJapanTime(work.RequestedAt).ToString("yyyy-MM-dd HH:mm:ss")</td>
-                            <td>@(work.ArtistSettingId?.ToString() ?? "-")</td>
+                            <td>@OperationsModel.GetManualWorkTarget(work)</td>
                         </tr>
                     }
                     </tbody>
@@ -139,9 +140,9 @@
                     {
                         <tr>
                             <td>@OperationsModel.ToJapanTime(work.RequestedAt).ToString("yyyy-MM-dd HH:mm:ss")</td>
-                            <td>@(work.Type == ManualWorkType.FullScrape ? "通常取得" : "Artist全作品")</td>
+                            <td>@OperationsModel.GetManualWorkTypeLabel(work.Type)</td>
                             <td class="@(work.Status == ManualWorkStatus.Completed ? "ok" : work.Status == ManualWorkStatus.Failed ? "ng" : work.Status == ManualWorkStatus.Running ? "running" : "pending")">@work.Status</td>
-                            <td>@(work.ArtistSettingId?.ToString() ?? "-")</td>
+                            <td>@OperationsModel.GetManualWorkTarget(work)</td>
                             <td>@(work.CompletedAt.HasValue ? OperationsModel.ToJapanTime(work.CompletedAt.Value).ToString("yyyy-MM-dd HH:mm:ss") : "-")</td>
                             <td class="error">@(work.FailureReason ?? "")</td>
                         </tr>
@@ -187,7 +188,7 @@
                     <thead>
                     <tr>
                         <th>開始（JST）</th><th>種別</th><th>カテゴリ</th><th>結果</th>
-                        <th>件数</th><th>追加</th><th>更新</th><th>時間</th><th>失敗理由</th>
+                        <th>件数</th><th>ページ</th><th>追加</th><th>更新</th><th>時間</th><th>失敗種別 / 理由</th>
                     </tr>
                     </thead>
                     <tbody>
@@ -197,12 +198,28 @@
                             <td>@OperationsModel.ToJapanTime(run.StartedAt).ToString("yyyy-MM-dd HH:mm:ss")</td>
                             <td>@run.ExecutionType</td>
                             <td>@run.Category</td>
-                            <td class="@(run.IsSuccess ? "ok" : "ng")">@(run.IsSuccess ? "成功" : "失敗")</td>
+                            <td class="@(run.IsSuccess ? (run.CountDropOverrideUsed ? "warn" : "ok") : "ng")">
+                                @(run.IsSuccess ? (run.CountDropOverrideUsed ? "成功（急減許可）" : "成功") : "失敗")
+                            </td>
                             <td>@(run.ParsedCount?.ToString() ?? "-")</td>
+                            <td>@(run.PageCount?.ToString() ?? "-")</td>
                             <td>@run.AddedCount</td>
                             <td>@run.UpdatedCount</td>
                             <td>@(TimeSpan.FromMilliseconds(run.DurationMilliseconds).ToString(@"hh\:mm\:ss"))</td>
-                            <td class="error">@(run.FailureReason ?? "")</td>
+                            <td class="error">
+                                @if (!run.IsSuccess)
+                                {
+                                    @if (run.FailureType == ScrapeFailureType.AbnormalCount)
+                                    {
+                                        <div>件数異常 / @run.AbnormalCountReason</div>
+                                    }
+                                    else
+                                    {
+                                        <div>@run.FailureType</div>
+                                    }
+                                    <div>@(run.FailureReason ?? "")</div>
+                                }
+                            </td>
                         </tr>
                     }
                     </tbody>

@@ -21,7 +21,18 @@ public sealed class DiscordNotificationService(IHttpClientFactory httpClientFact
         var execution = executionType switch { ScrapeExecutionType.Scheduled => "定期取得", ScrapeExecutionType.Manual => "手動取得", ScrapeExecutionType.Retry => "Retry", _ => executionType.ToString() };
         string content;
         if (result.IsSuccess)
-            content = $"DiscaScout: {execution} / {category} 成功\n取得 {result.TotalCount ?? 0}件 / 新規 {result.AddedCount}件 / 更新 {result.UpdatedCount}件";
+        {
+            content = $"DiscaScout: {execution} / {category} 成功\n取得 {result.TotalCount ?? 0}件 / {result.PageCount?.ToString() ?? "?"}ページ / 新規 {result.AddedCount}件 / 更新 {result.UpdatedCount}件";
+            if (result.CountDropOverrideUsed)
+            {
+                content += "\n確認済みの急減許可を使用してDBへ反映しました。";
+            }
+        }
+        else if (result.FailureType == ScrapeFailureType.AbnormalCount)
+        {
+            content = BuildAbnormalCountMessage(execution, category, result);
+            if (nextRetryAt.HasValue) content += $"\n次回Retry: {FormatJapanTime(nextRetryAt.Value)}";
+        }
         else
         {
             content = $"DiscaScout: {execution} / {category} 失敗\n{Truncate(result.ErrorMessage, 1200)}";
@@ -48,6 +59,26 @@ public sealed class DiscordNotificationService(IHttpClientFactory httpClientFact
             throw new InvalidOperationException("Webhook URLが設定されていません");
 
         await SendSafelyAsync(settings.WebhookUrl, "DiscaScout: Discord通知のテストです。\nWebhookへの接続に成功しました。", throwOnFailure: true, cancellationToken);
+    }
+
+    private static string BuildAbnormalCountMessage(string execution, string category, CategoryScrapeResult result)
+    {
+        var currentPage = result.PageCount?.ToString() ?? "?";
+        var previousPage = result.PreviousAcceptedPageCount?.ToString() ?? "?";
+
+        if (result.AbnormalCountReason == AbnormalCountReason.ZeroCount)
+        {
+            var previous = result.PreviousAcceptedCount?.ToString() ?? "基準なし";
+            return $"DiscaScout: {execution} / {category} 件数異常\n取得件数が0件のためDBへの反映を中止しました。\n前回正常: {previous}件 / {previousPage}ページ → 今回: 0件 / {currentPage}ページ";
+        }
+
+        if (result.PreviousAcceptedCount is int previousCount && result.TotalCount is int currentCount)
+        {
+            var ratio = (double)currentCount / previousCount * 100;
+            return $"DiscaScout: {execution} / {category} 件数異常\n前回正常 {previousCount}件 → 今回 {currentCount}件 ({ratio:F1}%、許容下限70%) のためDBへの反映を中止しました。\nページ数（参考）: {previousPage} → {currentPage}";
+        }
+
+        return $"DiscaScout: {execution} / {category} 件数異常\n{Truncate(result.ErrorMessage, 1200)}\n今回: {result.TotalCount?.ToString() ?? "?"}件 / {currentPage}ページ";
     }
 
     private async Task SendSafelyAsync(string? webhookUrl, string content, bool throwOnFailure, CancellationToken cancellationToken)

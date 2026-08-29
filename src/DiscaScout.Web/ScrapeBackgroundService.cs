@@ -96,6 +96,21 @@ public sealed class ScrapeBackgroundService(
                             await NotifyExecutionAsync(scope.ServiceProvider, ScrapeExecutionType.Manual, result, ct);
                             break;
                         }
+                        case ManualWorkType.CategoryScrape:
+                        {
+                            if (item.Category is null) throw new InvalidOperationException("CategoryScrape要求にCategoryが設定されていない");
+
+                            var result = await scope.ServiceProvider.GetRequiredService<ScrapeRunCoordinator>()
+                                .ExecuteManualCategoryAsync(item.Category.Value, ct);
+                            if (result.IsSuccess)
+                                await store.MarkCompletedAsync(item.Id, DateTime.UtcNow, ct);
+                            else
+                                await store.MarkFailedAsync(item.Id, DateTime.UtcNow, result.ErrorMessage ?? "カテゴリ取得に失敗した。実行履歴を確認すること。", ct);
+
+                            await scope.ServiceProvider.GetRequiredService<DiscordNotificationService>()
+                                .NotifyScrapeAsync(ScrapeExecutionType.Manual, result, result.NextRetryAt, ct);
+                            break;
+                        }
                         case ManualWorkType.ArtistCatalog:
                         {
                             if (item.ArtistSettingId is null) throw new InvalidOperationException("ArtistCatalog要求にArtistSettingIdが設定されていない");

@@ -25,6 +25,47 @@ public sealed class ManualWorkStoreTests
     }
 
     [Fact]
+    public async Task TryEnqueueCategoryScrapeAsync_同カテゴリは重複防止し別カテゴリは登録できる()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        var store = new ManualWorkStore(database.Context);
+        var now = new DateTime(2026, 8, 30, 12, 0, 0, DateTimeKind.Utc);
+
+        Assert.True(await store.TryEnqueueCategoryScrapeAsync(ScrapeCategory.New, now));
+        Assert.False(await store.TryEnqueueCategoryScrapeAsync(ScrapeCategory.New, now.AddMinutes(1)));
+        Assert.True(await store.TryEnqueueCategoryScrapeAsync(ScrapeCategory.Upcoming, now.AddMinutes(2)));
+
+        var items = await database.Context.ManualWorkItems.AsNoTracking().OrderBy(x => x.RequestedAt).ToListAsync();
+        Assert.Equal(2, items.Count);
+        Assert.Equal(ScrapeCategory.New, items[0].Category);
+        Assert.Equal(ScrapeCategory.Upcoming, items[1].Category);
+    }
+
+    [Fact]
+    public async Task TryEnqueueCategoryScrapeAsync_FullScrape保留中は追加登録しない()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        var store = new ManualWorkStore(database.Context);
+        var now = new DateTime(2026, 8, 30, 12, 0, 0, DateTimeKind.Utc);
+
+        Assert.True(await store.TryEnqueueFullScrapeAsync(now));
+        Assert.False(await store.TryEnqueueCategoryScrapeAsync(ScrapeCategory.New, now.AddMinutes(1)));
+        Assert.Single(database.Context.ManualWorkItems);
+    }
+
+    [Fact]
+    public async Task TryEnqueueFullScrapeAsync_CategoryScrape保留中は追加登録しない()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        var store = new ManualWorkStore(database.Context);
+        var now = new DateTime(2026, 8, 30, 12, 0, 0, DateTimeKind.Utc);
+
+        Assert.True(await store.TryEnqueueCategoryScrapeAsync(ScrapeCategory.New, now));
+        Assert.False(await store.TryEnqueueFullScrapeAsync(now.AddMinutes(1)));
+        Assert.Single(database.Context.ManualWorkItems);
+    }
+
+    [Fact]
     public async Task TryEnqueueArtistCatalogAsync_同じArtistだけ重複を防ぎ別Artistは登録する()
     {
         await using var database = await TestDatabase.CreateAsync();
