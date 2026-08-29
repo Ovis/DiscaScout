@@ -37,8 +37,8 @@ public sealed class ScrapeRun
     public long Id { get; set; }
     public ScrapeExecutionType ExecutionType { get; set; }
     public ScrapeCategory Category { get; set; }
-    public DateTimeOffset StartedAt { get; set; }
-    public DateTimeOffset CompletedAt { get; set; }
+    public DateTime StartedAt { get; set; }
+    public DateTime CompletedAt { get; set; }
     public long DurationMilliseconds { get; set; }
     public bool IsSuccess { get; set; }
     public int? FetchedCount { get; set; }
@@ -62,8 +62,8 @@ public sealed class ScrapeRetry
     /// </summary>
     public int AttemptNumber { get; set; }
 
-    public DateTimeOffset DueAt { get; set; }
+    public DateTime DueAt { get; set; }
     public ScrapeRetryStatus Status { get; set; }
-    public DateTimeOffset CreatedAt { get; set; }
-    public DateTimeOffset? ResolvedAt { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime? ResolvedAt { get; set; }
 }
