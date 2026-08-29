@@ -8,7 +8,8 @@ namespace DiscaScout.Application;
 /// </summary>
 public sealed class ArtistCatalogCollectionService(
     IDiscasArtistCatalogCrawler crawler,
-    ArtistCatalogStore catalogStore)
+    ArtistCatalogStore catalogStore,
+    DiscImageCacheService? imageCache = null)
 {
     /// <summary>
     /// 指定ArtistSettingの全作品をDISCASから取得し、完全スナップショットとして保存する
@@ -31,6 +32,15 @@ public sealed class ArtistCatalogCollectionService(
         // 全ページ取得に成功した場合だけPersistenceへ渡し、途中失敗した検索結果で
         // 既存Catalog関係をInactiveにしないようCrawlerの完全スナップショット契約を維持する。
         var snapshot = await crawler.CrawlAsync(setting.Artist, cancellationToken);
-        return await catalogStore.ApplyAsync(artistSettingId, snapshot, cancellationToken);
+        var result = await catalogStore.ApplyAsync(artistSettingId, snapshot, cancellationToken);
+
+        // Catalog専用CDも一覧表示時には同じローカル画像キャッシュを利用するため、
+        // DB反映が確定してから後段で画像を同期する。画像失敗はCatalogの完全性判定とは分離する。
+        if (imageCache is not null)
+        {
+            await imageCache.SyncAsync(snapshot.Products.Select(x => x.DiscasId), cancellationToken);
+        }
+
+        return result;
     }
 }
