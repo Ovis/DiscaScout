@@ -3,6 +3,7 @@ using DiscaScout.Core;
 using DiscaScout.Persistence;
 using DiscaScout.Scraping;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace DiscaScout.Application;
 
@@ -13,6 +14,7 @@ public sealed class DiscDetailMetadataService(
     DiscaScoutDbContext dbContext,
     DiscasPageFetcher pageFetcher,
     DiscasDiscDetailParser parser,
+    ILogger<DiscDetailMetadataService> logger,
     TimeProvider? timeProvider = null)
 {
     private static readonly TimeSpan FailedAttemptRetryInterval = TimeSpan.FromHours(6);
@@ -80,29 +82,70 @@ public sealed class DiscDetailMetadataService(
         var disc = await dbContext.Discs.Include(x => x.Tracks).SingleOrDefaultAsync(x => x.Id == discId, cancellationToken);
         if (disc is null) return false;
 
-        disc.DetailLastAttemptAt = clock.GetUtcNow().UtcDateTime;
-        await dbContext.SaveChangesAsync(cancellationToken);
+        logger.LogInformation(
+            "DISCAS詳細取得を開始します: DiscId={DiscId}, DiscasId={DiscasId}, Title={Title}, Artist={Artist}, Url={Url}",
+            disc.Id,
+            disc.DiscasId,
+            disc.Title,
+            disc.Artist,
+            disc.ProductUrl);
 
-        var result = await pageFetcher.FetchAsync(new Uri(disc.ProductUrl), cancellationToken);
-        if (result.StatusCode is < HttpStatusCode.OK or >= HttpStatusCode.MultipleChoices)
-            throw new HttpRequestException($"DISCAS詳細ページの取得に失敗した: {(int)result.StatusCode} {result.StatusCode}");
+        try
+        {
+            disc.DetailLastAttemptAt = clock.GetUtcNow().UtcDateTime;
+            await dbContext.SaveChangesAsync(cancellationToken);
 
-        var detail = parser.Parse(result.Html, result.FinalUri);
-        var fetchedAt = clock.GetUtcNow().UtcDateTime;
-        var today = GetJapanToday(fetchedAt);
-        disc.RentalStartDate = detail.RentalStartDate;
-        disc.Description = detail.Description;
-        disc.IsTwoDisc = detail.IsTwoDisc;
-        disc.DetailFetchedAt = fetchedAt;
-        disc.DetailRefreshCompleted = detail.RentalStartDate <= today;
+            var result = await pageFetcher.FetchAsync(new Uri(disc.ProductUrl), cancellationToken);
+            if (result.StatusCode is < HttpStatusCode.OK or >= HttpStatusCode.MultipleChoices)
+                throw new HttpRequestException($"DISCAS詳細ページの取得に失敗した: {(int)result.StatusCode} {result.StatusCode}");
 
-        dbContext.DiscTracks.RemoveRange(disc.Tracks);
-        disc.Tracks.Clear();
-        foreach (var track in detail.Tracks)
-            disc.Tracks.Add(new DiscTrack { TrackNumber = track.TrackNumber, Title = track.Title, Duration = track.Duration });
+            var detail = parser.Parse(result.Html, result.FinalUri);
+            var fetchedAt = clock.GetUtcNow().UtcDateTime;
+            var today = GetJapanToday(fetchedAt);
+            disc.RentalStartDate = detail.RentalStartDate;
+            disc.Description = detail.Description;
+            disc.IsTwoDisc = detail.IsTwoDisc;
+            disc.DetailFetchedAt = fetchedAt;
+            disc.DetailRefreshCompleted = detail.RentalStartDate <= today;
 
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return true;
+            dbContext.DiscTracks.RemoveRange(disc.Tracks);
+            disc.Tracks.Clear();
+            foreach (var track in detail.Tracks)
+                disc.Tracks.Add(new DiscTrack { TrackNumber = track.TrackNumber, Title = track.Title, Duration = track.Duration });
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            logger.LogInformation(
+                "DISCAS詳細取得が完了しました: DiscId={DiscId}, DiscasId={DiscasId}, Title={Title}, Artist={Artist}, RentalStartDate={RentalStartDate}, TrackCount={TrackCount}, IsTwoDisc={IsTwoDisc}, RefreshCompleted={RefreshCompleted}",
+                disc.Id,
+                disc.DiscasId,
+                disc.Title,
+                disc.Artist,
+                detail.RentalStartDate,
+                detail.Tracks.Count,
+                detail.IsTwoDisc,
+                disc.DetailRefreshCompleted);
+
+            return true;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            // HTTPやHTML解析の低レベルログだけでは対象CDを追跡できないため、
+            // 失敗時にもCD識別情報を同じログイベントへ含める。
+            logger.LogWarning(
+                exception,
+                "DISCAS詳細取得に失敗しました: DiscId={DiscId}, DiscasId={DiscasId}, Title={Title}, Artist={Artist}, Url={Url}",
+                disc.Id,
+                disc.DiscasId,
+                disc.Title,
+                disc.Artist,
+                disc.ProductUrl);
+            throw;
+        }
     }
 
     private static DateOnly GetJapanToday(DateTime utcDateTime)
