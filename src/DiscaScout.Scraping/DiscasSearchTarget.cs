@@ -73,19 +73,21 @@ public static class DiscasSearchTarget
     /// </summary>
     private static string PercentEncodeWindows31J(string value)
     {
-        var bytes = Encoding.GetEncoding(932).GetBytes(value);
-        var builder = new StringBuilder(bytes.Length * 3);
+        var encoding = Encoding.GetEncoding(932);
+        var builder = new StringBuilder(value.Length * 3);
 
-        foreach (var valueByte in bytes)
+        foreach (var character in value)
         {
-            if ((valueByte >= (byte)'A' && valueByte <= (byte)'Z')
-                || (valueByte >= (byte)'a' && valueByte <= (byte)'z')
-                || (valueByte >= (byte)'0' && valueByte <= (byte)'9')
-                || valueByte is (byte)'-' or (byte)'_' or (byte)'.' or (byte)'~')
+            if (character <= 0x7F && IsUnreservedAscii((byte)character))
             {
-                builder.Append((char)valueByte);
+                builder.Append(character);
+                continue;
             }
-            else
+
+            // Shift_JIS系では2バイト文字の後続バイトがASCII範囲と同じ値になる場合がある。
+            // 文字列全体をバイト列へ変換してからASCII判定すると、その後続バイトだけ未エスケープになってしまうため、
+            // 非ASCII文字は文字単位でエンコードし、構成する全バイトを必ず%XX形式へ変換する。
+            foreach (var valueByte in encoding.GetBytes(character.ToString()))
             {
                 builder.Append('%');
                 builder.Append(valueByte.ToString("X2"));
@@ -93,5 +95,13 @@ public static class DiscasSearchTarget
         }
 
         return builder.ToString();
+    }
+
+    private static bool IsUnreservedAscii(byte value)
+    {
+        return (value >= (byte)'A' && value <= (byte)'Z')
+            || (value >= (byte)'a' && value <= (byte)'z')
+            || (value >= (byte)'0' && value <= (byte)'9')
+            || value is (byte)'-' or (byte)'_' or (byte)'.' or (byte)'~';
     }
 }
