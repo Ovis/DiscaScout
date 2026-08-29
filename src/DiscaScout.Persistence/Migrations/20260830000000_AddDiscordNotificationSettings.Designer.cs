@@ -12,6 +12,6 @@ partial class AddDiscordNotificationSettings
 {
     protected override void BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder modelBuilder)
     {
-        // モデル全体のSnapshotは別ファイルで管理する。Migration識別情報を明示して実行順を保証する。
+        DiscordNotificationSettingsModelBuilder.Build(modelBuilder);
     }
 }
