@@ -27,7 +27,7 @@ public sealed class DiscordNotificationService(IHttpClientFactory httpClientFact
             content = $"DiscaScout: {execution} / {category} 失敗\n{Truncate(result.ErrorMessage, 1200)}";
             if (nextRetryAt.HasValue) content += $"\n次回Retry: {FormatJapanTime(nextRetryAt.Value)}";
         }
-        await SendSafelyAsync(settings.WebhookUrl, content, cancellationToken);
+        await SendSafelyAsync(settings.WebhookUrl, content, throwOnFailure: false, cancellationToken);
     }
 
     /// <summary>Artist Catalogの手動取得失敗を通知する</summary>
@@ -35,10 +35,22 @@ public sealed class DiscordNotificationService(IHttpClientFactory httpClientFact
     {
         var settings = await settingsStore.GetAsync(cancellationToken);
         if (settings.Mode == DiscordNotificationMode.Off) return;
-        await SendSafelyAsync(settings.WebhookUrl, $"DiscaScout: Artist全作品収集 失敗\nArtistSettingId: {artistSettingId}\n{Truncate(errorMessage, 1200)}", cancellationToken);
+        await SendSafelyAsync(settings.WebhookUrl, $"DiscaScout: Artist全作品収集 失敗\nArtistSettingId: {artistSettingId}\n{Truncate(errorMessage, 1200)}", throwOnFailure: false, cancellationToken);
     }
 
-    private async Task SendSafelyAsync(string? webhookUrl, string content, CancellationToken cancellationToken)
+    /// <summary>
+    /// 保存済みWebhookへテスト通知を送信し、設定画面で疎通結果を確認できるようにする
+    /// </summary>
+    public async Task SendTestAsync(CancellationToken cancellationToken)
+    {
+        var settings = await settingsStore.GetAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(settings.WebhookUrl))
+            throw new InvalidOperationException("Webhook URLが設定されていません");
+
+        await SendSafelyAsync(settings.WebhookUrl, "DiscaScout: Discord通知のテストです。\nWebhookへの接続に成功しました。", throwOnFailure: true, cancellationToken);
+    }
+
+    private async Task SendSafelyAsync(string? webhookUrl, string content, bool throwOnFailure, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(webhookUrl)) return;
         try
@@ -49,8 +61,9 @@ public sealed class DiscordNotificationService(IHttpClientFactory httpClientFact
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
-            // Discordは監視経路であり本体処理の依存先ではない。送信失敗で取得結果やRetry制御を変えない。
+            // 通常通知ではWebhook障害を本体処理へ波及させないが、手動テストだけは画面へ失敗理由を返す。
             logger.LogWarning(ex, "Discord notification failed");
+            if (throwOnFailure) throw;
         }
     }
 
