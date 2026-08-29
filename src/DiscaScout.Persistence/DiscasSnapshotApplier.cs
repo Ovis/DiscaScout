@@ -62,6 +62,7 @@ public sealed class DiscasSnapshotApplier(DiscaScoutDbContext dbContext, TimePro
                 continue;
             }
 
+            var hadNormalSource = disc.Sources.Count > 0;
             var wasArchived = disc.IsArchived;
             var changed = ApplyMetadata(disc, scraped, now);
 
@@ -75,6 +76,14 @@ public sealed class DiscasSnapshotApplier(DiscaScoutDbContext dbContext, TimePro
                 source = CreateSource(category, scraped.SourceRank, now);
                 disc.Sources.Add(source);
                 changed = true;
+
+                // 全作品収集で先にDBへ入ったCDには通常Sourceが1件もない。
+                // そのCDが初めてNew/Upcomingへ現れた時点をユーザーにとっての「新着」として扱う。
+                if (!hadNormalSource && !disc.IsRented)
+                {
+                    AddReviewReason(disc, DiscReviewReasonType.New, now);
+                    disc.NeedsReview = true;
+                }
             }
             else
             {
@@ -92,7 +101,9 @@ public sealed class DiscasSnapshotApplier(DiscaScoutDbContext dbContext, TimePro
             disc.LastSeenAt = now;
             disc.IsArchived = false;
 
-            if (wasArchived && !disc.IsRented)
+            // Catalog専用CDはIsArchived=trueで保持するが、通常Sourceへの初参加は「再出現」ではない。
+            // 過去に通常カテゴリで観測済みだったCDだけREAPPEAREDを付与する。
+            if (wasArchived && hadNormalSource && !disc.IsRented)
             {
                 AddReviewReason(disc, DiscReviewReasonType.Reappeared, now);
                 disc.NeedsReview = true;
