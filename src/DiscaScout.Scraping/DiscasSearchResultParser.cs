@@ -70,7 +70,7 @@ public sealed partial class DiscasSearchResultParser
                 throw new DiscasSearchParseException($"商品{index + 1}のタイトルが空である");
             }
 
-            var artist = ExtractArtist(productElement, index);
+            var artist = ExtractArtist(productElement);
             var imageUrl = ResolveImageUrl(productElement.QuerySelector(ImageSelector)?.GetAttribute("src"), pageUri);
 
             products.Add(new ScrapedDisc(
@@ -101,25 +101,20 @@ public sealed partial class DiscasSearchResultParser
         return match.Success ? Uri.UnescapeDataString(match.Groups[1].Value) : null;
     }
 
-    private static string ExtractArtist(IElement productElement, int productIndex)
+    private static string? ExtractArtist(IElement productElement)
     {
         var productTitles = productElement.QuerySelectorAll(ProductTitleSelector);
 
-        // DISCASのPC向け商品DOMでは、1つ目の見出しがタイトル、2つ目がアーティスト表示になっている。
-        // アーティスト名がリンクになることが多いが、全ジャンル検索ではリンクを持たない商品も存在するため、
-        // artistsearchHmo.do のURL形には依存せず、表示上の2つ目の見出しそのものを正とする。
+        // DISCASのPC向け商品DOMでは通常、1つ目の見出しがタイトル、2つ目がアーティスト表示になっている。
+        // 全ジャンル検索では2つ目の見出し自体を持たない商品が実在するため、その場合はデータ欠損としてnullを保持する。
+        // titleIDと商品件数の整合性は別途検証するので、アーティスト欠損だけでカテゴリ全体を破棄しない。
         if (productTitles.Length < 2)
         {
-            throw new DiscasSearchParseException($"商品{productIndex + 1}にアーティスト表示が存在しない");
+            return null;
         }
 
         var artist = NormalizeDisplayText(productTitles[1].TextContent);
-        if (string.IsNullOrWhiteSpace(artist))
-        {
-            throw new DiscasSearchParseException($"商品{productIndex + 1}のアーティストが空である");
-        }
-
-        return artist;
+        return string.IsNullOrWhiteSpace(artist) ? null : artist;
     }
 
     private static string NormalizeDisplayText(string text)
