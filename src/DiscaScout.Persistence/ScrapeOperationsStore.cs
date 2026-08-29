@@ -13,6 +13,11 @@ public interface IScrapeOperationsStore
     Task CancelPendingRetriesAsync(ScrapeCategory category, DateTime resolvedAt, CancellationToken cancellationToken = default);
     Task CompleteRetryAsync(long retryId, DateTime resolvedAt, CancellationToken cancellationToken = default);
     Task<ScrapeRetry?> GetNextDueRetryAsync(DateTime now, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 件数安全装置の比較基準として、最後にDB反映まで成功した同カテゴリのRunを取得する
+    /// </summary>
+    Task<ScrapeRun?> GetLastAcceptedRunAsync(ScrapeCategory category, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -22,6 +27,9 @@ public interface IScrapeOperationsQueryStore
 {
     Task<IReadOnlyList<ScrapeRun>> GetRecentRunsAsync(int count, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ScrapeRetry>> GetPendingRetriesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>指定カテゴリで最後に発生した件数異常Runを取得する</summary>
+    Task<ScrapeRun?> GetLatestAbnormalCountRunAsync(ScrapeCategory category, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -114,6 +122,21 @@ public sealed class ScrapeOperationsStore(DiscaScoutDbContext dbContext) : IScra
     }
 
     /// <inheritdoc />
+    public Task<ScrapeRun?> GetLastAcceptedRunAsync(
+        ScrapeCategory category,
+        CancellationToken cancellationToken = default)
+    {
+        // 異常として拒否したRunを比較基準にすると壊れた件数が徐々に正常化されるため、
+        // DB反映まで成功したRunだけを次回の基準値として採用する。
+        return dbContext.ScrapeRuns
+            .AsNoTracking()
+            .Where(x => x.Category == category && x.IsSuccess && x.FetchedCount != null)
+            .OrderByDescending(x => x.CompletedAt)
+            .ThenByDescending(x => x.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<ScrapeRun>> GetRecentRunsAsync(
         int count,
         CancellationToken cancellationToken = default)
@@ -138,5 +161,18 @@ public sealed class ScrapeOperationsStore(DiscaScoutDbContext dbContext) : IScra
             .Where(x => x.Status == ScrapeRetryStatus.Pending)
             .OrderBy(x => x.DueAt)
             .ToListAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public Task<ScrapeRun?> GetLatestAbnormalCountRunAsync(
+        ScrapeCategory category,
+        CancellationToken cancellationToken = default)
+    {
+        return dbContext.ScrapeRuns
+            .AsNoTracking()
+            .Where(x => x.Category == category && x.FailureType == ScrapeFailureType.AbnormalCount)
+            .OrderByDescending(x => x.CompletedAt)
+            .ThenByDescending(x => x.Id)
+            .FirstOrDefaultAsync(cancellationToken);
     }
 }
