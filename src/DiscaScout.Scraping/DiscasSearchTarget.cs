@@ -57,10 +57,15 @@ public static class DiscasSearchTarget
         }
 
         // 現行DISCASのアーティスト検索はAK/AKNへ同じ検索語をWindows-31Jで送る。
-        // UriBuilderに未エスケープ日本語を渡すとUTF-8で再エンコードされるため、バイト列から明示的に%XX化する。
+        // 通常のUri生成ではUTF-8ではない%XX列がQuery正規化で書き換えられるため、
+        // DISCASへ送る検索語のバイト列を保持する目的に限ってPath/Queryのcanonicalizationを無効化する。
         var encodedArtist = PercentEncodeWindows31J(artist.Trim());
-        var uri = $"{SearchBaseUri}?AK={encodedArtist}&AKN={encodedArtist}&PA=rt_original_&RT=1&SK=6&SRT=1&PN={pageNumber}";
-        return new Uri(uri, UriKind.Absolute);
+        var uriString = $"{SearchBaseUri}?AK={encodedArtist}&AKN={encodedArtist}&PA=rt_original_&RT=1&SK=6&SRT=1&PN={pageNumber}";
+        var creationOptions = new UriCreationOptions
+        {
+            DangerousDisablePathAndQueryCanonicalization = true
+        };
+        return new Uri(uriString, in creationOptions);
     }
 
     /// <summary>
