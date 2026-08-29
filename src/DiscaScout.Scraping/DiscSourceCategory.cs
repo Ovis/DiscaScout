@@ -1,7 +1,7 @@
 namespace DiscaScout.Scraping;
 
 /// <summary>
-/// DISCASの通常クロールで扱うリリースカテゴリを表す
+/// DISCAS検索結果を取得した用途を表す
 /// </summary>
 public enum DiscSourceCategory
 {
@@ -13,5 +13,10 @@ public enum DiscSourceCategory
     /// <summary>
     /// 新作
     /// </summary>
-    New
+    New,
+
+    /// <summary>
+    /// Artist全作品収集
+    /// </summary>
+    ArtistCatalog
 }
