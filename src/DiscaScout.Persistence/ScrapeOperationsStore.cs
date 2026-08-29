@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 namespace DiscaScout.Persistence;
 
 /// <summary>
-/// スクレイピング実行履歴とリトライ予定の永続化境界
+/// スクレイピング実行履歴とリトライ予定を更新する永続化境界
 /// </summary>
 public interface IScrapeOperationsStore
 {
@@ -16,9 +16,18 @@ public interface IScrapeOperationsStore
 }
 
 /// <summary>
-/// EF Coreを使用して実行履歴とリトライ予定をSQLiteへ保存する
+/// Web運用画面で表示するスクレイピング状態を読み取る境界
 /// </summary>
-public sealed class ScrapeOperationsStore(DiscaScoutDbContext dbContext) : IScrapeOperationsStore
+public interface IScrapeOperationsQueryStore
+{
+    Task<IReadOnlyList<ScrapeRun>> GetRecentRunsAsync(int count, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ScrapeRetry>> GetPendingRetriesAsync(CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// EF Coreを使用して実行履歴とリトライ予定をSQLiteへ保存・照会する
+/// </summary>
+public sealed class ScrapeOperationsStore(DiscaScoutDbContext dbContext) : IScrapeOperationsStore, IScrapeOperationsQueryStore
 {
     /// <inheritdoc />
     public async Task AddRunAsync(ScrapeRun run, CancellationToken cancellationToken = default)
@@ -100,5 +109,32 @@ public sealed class ScrapeOperationsStore(DiscaScoutDbContext dbContext) : IScra
             .Where(x => x.Status == ScrapeRetryStatus.Pending && x.DueAt <= now)
             .OrderBy(x => x.DueAt)
             .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ScrapeRun>> GetRecentRunsAsync(
+        int count,
+        CancellationToken cancellationToken = default)
+    {
+        if (count <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(count));
+        }
+
+        return await dbContext.ScrapeRuns
+            .AsNoTracking()
+            .OrderByDescending(x => x.StartedAt)
+            .Take(count)
+            .ToListAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ScrapeRetry>> GetPendingRetriesAsync(CancellationToken cancellationToken = default)
+    {
+        return await dbContext.ScrapeRetries
+            .AsNoTracking()
+            .Where(x => x.Status == ScrapeRetryStatus.Pending)
+            .OrderBy(x => x.DueAt)
+            .ToListAsync(cancellationToken);
     }
 }

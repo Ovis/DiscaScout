@@ -9,6 +9,7 @@ namespace DiscaScout.Persistence;
 public interface IScrapeScheduleStore
 {
     Task<ScrapeScheduleSettings> GetAsync(CancellationToken cancellationToken = default);
+    Task UpdateAsync(bool isEnabled, DayOfWeek dayOfWeek, TimeOnly localTime, CancellationToken cancellationToken = default);
     Task MarkScheduledExecutionAsync(DateOnly localDate, CancellationToken cancellationToken = default);
 }
 
@@ -29,11 +30,33 @@ public sealed class ScrapeScheduleStore(DiscaScoutDbContext dbContext) : IScrape
         }
 
         // 初回起動直後に意図せずDISCASへアクセスしないよう、定期実行は無効状態で作成する。
-        // Web設定画面が追加されるまではこの既定値を維持し、利用者が明示的に有効化した場合だけ実行する。
+        // Web設定画面から利用者が明示的に有効化した場合だけ実行する。
         settings = new ScrapeScheduleSettings();
         dbContext.ScrapeScheduleSettings.Add(settings);
         await dbContext.SaveChangesAsync(cancellationToken);
         return settings;
+    }
+
+    /// <inheritdoc />
+    public async Task UpdateAsync(
+        bool isEnabled,
+        DayOfWeek dayOfWeek,
+        TimeOnly localTime,
+        CancellationToken cancellationToken = default)
+    {
+        if (!Enum.IsDefined(dayOfWeek))
+        {
+            throw new ArgumentOutOfRangeException(nameof(dayOfWeek));
+        }
+
+        var settings = await GetAsync(cancellationToken);
+        settings.IsEnabled = isEnabled;
+        settings.DayOfWeek = dayOfWeek;
+        settings.LocalTime = localTime;
+
+        // 曜日や時刻を変更しても「その日に既に実行した」という事実は維持する。
+        // 設定変更直後の同日再実行を避け、必要な場合は手動実行を使う設計とする。
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 
     /// <inheritdoc />
