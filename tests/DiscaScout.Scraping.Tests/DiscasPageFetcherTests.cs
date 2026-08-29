@@ -32,7 +32,7 @@ public sealed class DiscasPageFetcherTests
                 Content = content
             });
         using var httpClient = new HttpClient(handler);
-        var fetcher = new DiscasPageFetcher(httpClient);
+        var fetcher = new DiscasPageFetcher(httpClient, TimeSpan.Zero);
 
         var result = await fetcher.FetchAsync(new Uri("https://example.test/search"));
 
@@ -61,6 +61,31 @@ public sealed class DiscasPageFetcherTests
         Assert.True(
             starts[1] - starts[0] >= TimeSpan.FromMilliseconds(80),
             $"リクエスト開始間隔が短すぎる: {starts[1] - starts[0]}");
+    }
+
+    /// <summary>
+    /// CategoryとArtistでFetcherが別インスタンスでも共有Throttleにより同時HTTPアクセスしないことを確認する
+    /// </summary>
+    [Fact]
+    public async Task FetchAsync_DifferentFetcherInstances_SharedThrottleSerializesRequests()
+    {
+        var handler = new RecordingHttpMessageHandler();
+        using var httpClient1 = new HttpClient(handler, disposeHandler: false);
+        using var httpClient2 = new HttpClient(handler, disposeHandler: false);
+        var throttle = new DiscasRequestThrottle(TimeSpan.FromMilliseconds(100));
+        var firstFetcher = new DiscasPageFetcher(httpClient1, throttle);
+        var secondFetcher = new DiscasPageFetcher(httpClient2, throttle);
+
+        await Task.WhenAll(
+            firstFetcher.FetchAsync(new Uri("https://example.test/category")),
+            secondFetcher.FetchAsync(new Uri("https://example.test/artist")));
+
+        Assert.Equal(1, handler.MaximumConcurrentRequests);
+        var starts = handler.StartedAt.Order().ToArray();
+        Assert.Equal(2, starts.Length);
+        Assert.True(starts[1] - starts[0] >= TimeSpan.FromMilliseconds(80));
+
+        handler.Dispose();
     }
 
     /// <summary>

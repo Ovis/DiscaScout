@@ -16,12 +16,21 @@ if (!string.IsNullOrEmpty(databaseDirectory))
 builder.Services.AddRazorPages();
 builder.Services.AddDbContext<DiscaScoutDbContext>(options =>
     options.UseSqlite($"Data Source={databasePath}"));
+
+// DISCASへの全HTTPアクセスで同じ排他・2秒間隔を共有する。
+// Crawler単位でFetcherが別インスタンスになっても相手サーバーへの並列アクセスを発生させない。
+builder.Services.AddSingleton<DiscasRequestThrottle>();
 builder.Services.AddHttpClient<DiscasPageFetcher>();
 builder.Services.AddScoped<DiscasSearchResultParser>();
 builder.Services.AddScoped<DiscasCategoryCrawler>();
 builder.Services.AddScoped<IDiscasCategoryCrawler>(sp => sp.GetRequiredService<DiscasCategoryCrawler>());
+builder.Services.AddScoped<DiscasArtistCatalogCrawler>();
+builder.Services.AddScoped<IDiscasArtistCatalogCrawler>(sp => sp.GetRequiredService<DiscasArtistCatalogCrawler>());
 builder.Services.AddScoped<DiscasSnapshotApplier>();
 builder.Services.AddScoped<IDiscasSnapshotStore, DiscasSnapshotStore>();
+builder.Services.AddScoped<ArtistWatchService>();
+builder.Services.AddScoped<ArtistCatalogStore>();
+builder.Services.AddScoped<ArtistCatalogCollectionService>();
 builder.Services.AddScoped<ScrapeOperationsStore>();
 builder.Services.AddScoped<IScrapeOperationsStore>(sp => sp.GetRequiredService<ScrapeOperationsStore>());
 builder.Services.AddScoped<IScrapeOperationsQueryStore>(sp => sp.GetRequiredService<ScrapeOperationsStore>());

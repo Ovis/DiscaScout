@@ -1,18 +1,20 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
 namespace DiscaScout.Persistence.Migrations;
 
 /// <summary>
-/// 最新のEF Coreモデルを固定し、後続Migrationとの差分基準として使用する
+/// AddArtistCatalog Migrationの識別情報とTargetModelを保持する
 /// </summary>
 [DbContext(typeof(DiscaScoutDbContext))]
-public sealed class DiscaScoutDbContextModelSnapshot : ModelSnapshot
+[Migration("20260829200000_AddArtistCatalog")]
+partial class AddArtistCatalog
 {
     /// <inheritdoc />
-    protected override void BuildModel(ModelBuilder modelBuilder)
+    protected override void BuildTargetModel(ModelBuilder modelBuilder)
     {
         ArtistCatalogModelBuilder.Build(modelBuilder);
     }

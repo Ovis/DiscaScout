@@ -33,6 +33,7 @@ public sealed class Disc
     public List<DiscReviewReason> ReviewReasons { get; } = [];
     public List<DiscChangeHistory> ChangeHistory { get; } = [];
     public List<DiscArtistMatch> ArtistMatches { get; } = [];
+    public List<DiscArtistCatalog> ArtistCatalogEntries { get; } = [];
 }
 
 /// <summary>
