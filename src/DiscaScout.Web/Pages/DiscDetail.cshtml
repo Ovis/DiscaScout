@@ -6,6 +6,7 @@
     var backUrl = !string.IsNullOrWhiteSpace(Model.ReturnUrl) && Url.IsLocalUrl(Model.ReturnUrl)
         ? Model.ReturnUrl
         : "/discs";
+    var rentalCategory = DiscDetailModel.FormatRentalCategory(Model.Disc.RentalStartDate);
 }
 <!doctype html>
 <html lang="ja">
@@ -33,6 +34,7 @@
         .badge.archived { background: #f2dede; }
         .badge.pickup { background: #e8dcff; }
         .badge.format { background: #dceeff; }
+        .badge.release { background: #e7f0dd; }
         .meta-grid { display: grid; grid-template-columns: 150px minmax(0,1fr); gap: 6px 14px; font-size: 13px; margin-top: 14px; }
         .meta-grid dt { color: #68707c; font-weight: 650; }
         .meta-grid dd { margin: 0; overflow-wrap: anywhere; }
@@ -90,6 +92,7 @@
                 {
                     <span class="badge pickup">★ Pickup</span>
                 }
+                @if (!string.IsNullOrWhiteSpace(rentalCategory)) { <span class="badge release">@rentalCategory</span> }
                 @if (Model.Disc.IsMaxiSingle) { <span class="badge format">MAXI</span> }
                 @if (Model.Disc.IsTwoDisc == true) { <span class="badge format">2枚組</span> }
                 @if (Model.Disc.IsRented) { <span class="badge rented">借りた</span> }
