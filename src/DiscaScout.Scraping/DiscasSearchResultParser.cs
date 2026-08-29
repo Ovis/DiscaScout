@@ -47,6 +47,7 @@ public sealed partial class DiscasSearchResultParser
 
         var document = htmlParser.ParseDocument(html);
         var productElements = document.QuerySelectorAll(ProductSelector);
+        var genreMetadata = DiscasGenreMetadataParser.Parse(document);
         var products = new List<ScrapedDisc>(productElements.Length);
 
         for (var index = 0; index < productElements.Length; index++)
@@ -71,6 +72,13 @@ public sealed partial class DiscasSearchResultParser
                 throw new DiscasSearchParseException($"商品{index + 1}のタイトルが空である");
             }
 
+            if (!genreMetadata.TryGetValue(discasId, out var genre))
+            {
+                // ジャンルは検索結果HTML内から追加アクセスなしで取得でき、主要な絞り込み条件として利用する。
+                // DOM変更で欠落したデータを黙って保存すると後から分類できなくなるため、必須項目として検証する。
+                throw new DiscasSearchParseException($"商品{index + 1} [{discasId}] のジャンル情報を取得できない");
+            }
+
             var artist = ExtractArtist(productElement, index);
             var imageUrl = ResolveImageUrl(productElement.QuerySelector(ImageSelector)?.GetAttribute("src"), pageUri);
 
@@ -79,6 +87,9 @@ public sealed partial class DiscasSearchResultParser
                 productUri.AbsoluteUri,
                 title,
                 artist,
+                genre.Large,
+                genre.Middle,
+                genre.Small,
                 imageUrl,
                 RentalStartDate: null,
                 category,
