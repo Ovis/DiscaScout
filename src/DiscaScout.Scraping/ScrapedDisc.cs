@@ -14,6 +14,7 @@ namespace DiscaScout.Scraping;
 /// <param name="RentalStartDate">レンタル開始日。検索結果から取得できない場合はnull</param>
 /// <param name="Category">この検索結果を取得したリリースカテゴリ</param>
 /// <param name="SourceRank">カテゴリ全体での表示順位。1始まり</param>
+/// <param name="IsMaxiSingle">タイトル先頭の【MAXI】表記から判定したマキシシングルかどうか</param>
 public sealed record ScrapedDisc(
     string DiscasId,
     string ProductUrl,
@@ -25,4 +26,5 @@ public sealed record ScrapedDisc(
     string? ImageUrl,
     DateOnly? RentalStartDate,
     DiscSourceCategory Category,
-    int SourceRank);
+    int SourceRank,
+    bool IsMaxiSingle = false);
