@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../DiscaScout.Application/DiscaScout.Application.csproj" />
+    <ProjectReference Include="../DiscaScout.Persistence/DiscaScout.Persistence.csproj" />
+    <ProjectReference Include="../DiscaScout.Scraping/DiscaScout.Scraping.csproj" />
+  </ItemGroup>
+</Project>
