@@ -60,7 +60,7 @@
 </head>
 <body>
 <main>
-    <nav><a href="/discs">CD一覧</a><a href="/artists">Artist設定</a><a href="/operations">運用</a></nav>
+    <partial name="_Navigation" />
     <div class="back"><a href="@backUrl">← 一覧へ戻る</a></div>
 
     @if (!string.IsNullOrWhiteSpace(Model.StatusMessage))
