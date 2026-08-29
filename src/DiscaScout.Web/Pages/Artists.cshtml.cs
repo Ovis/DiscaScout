@@ -74,7 +74,7 @@ public sealed class ArtistsModel(
     }
 
     /// <summary>
-    /// Artist設定を更新し、全作品収集が有効なら変更後条件で再収集する
+    /// Artist設定を更新し、検索条件に影響する変更があった場合だけ全作品を再収集する
     /// </summary>
     public async Task<IActionResult> OnPostUpdateAsync(
         long id,
@@ -85,6 +85,15 @@ public sealed class ArtistsModel(
         bool reopenExistingReviewedMatches,
         CancellationToken cancellationToken)
     {
+        var current = await dbContext.ArtistSettings
+            .AsNoTracking()
+            .SingleAsync(x => x.Id == id, cancellationToken);
+        var normalizedArtist = DiscTextNormalizer.Normalize(artist);
+        var shouldCollect = collectFullCatalog
+            && (!current.CollectFullCatalog
+                || current.MatchType != matchType
+                || !string.Equals(current.NormalizedArtist, normalizedArtist, StringComparison.Ordinal));
+
         await artistWatchService.UpdateAsync(
             id,
             artist,
@@ -94,8 +103,10 @@ public sealed class ArtistsModel(
             reopenExistingReviewedMatches,
             cancellationToken);
 
-        if (collectFullCatalog)
+        if (shouldCollect)
         {
+            // Watchの有効/無効だけではDISCAS側の検索結果は変わらないため再取得しない。
+            // Artist名・一致方法・全作品収集の有効化だけを外部アクセスが必要な変更として扱う。
             var collected = await executionGate.TryRunAsync(
                 ct => catalogCollectionService.CollectAsync(id, ct),
                 cancellationToken);
