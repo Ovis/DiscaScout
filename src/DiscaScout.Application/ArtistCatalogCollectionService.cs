@@ -33,14 +33,30 @@ public sealed class ArtistCatalogCollectionService(
         // 既存Catalog関係をInactiveにしないようCrawlerの完全スナップショット契約を維持する。
         var snapshot = await crawler.CrawlAsync(setting.Artist, cancellationToken);
         var result = await catalogStore.ApplyAsync(artistSettingId, snapshot, cancellationToken);
+        await TrySyncImagesAsync(snapshot.Products.Select(x => x.DiscasId), cancellationToken);
+        return result;
+    }
 
-        // Catalog専用CDも一覧表示時には同じローカル画像キャッシュを利用するため、
-        // DB反映が確定してから後段で画像を同期する。画像失敗はCatalogの完全性判定とは分離する。
-        if (imageCache is not null)
+    private async Task TrySyncImagesAsync(IEnumerable<string> discasIds, CancellationToken cancellationToken)
+    {
+        if (imageCache is null)
         {
-            await imageCache.SyncAsync(snapshot.Products.Select(x => x.DiscasId), cancellationToken);
+            return;
         }
 
-        return result;
+        try
+        {
+            // Catalog専用CDも同じ画像キャッシュを利用するが、画像はCatalog完全性判定の構成要素ではない。
+            // 保存先障害や個別画像障害で、正常に確定したCatalogスナップショットを失敗扱いにしない。
+            await imageCache.SyncAsync(discasIds, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            // ImagePath未更新のCDは次回収集または後続のキャッシュ同期で再試行できる。
+        }
     }
 }
