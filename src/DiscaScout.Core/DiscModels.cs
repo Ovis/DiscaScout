@@ -28,6 +28,7 @@ public sealed class Disc
     public DateTime? DetailLastAttemptAt { get; set; }
     public DateTime? DetailFetchedAt { get; set; }
     public bool DetailRefreshCompleted { get; set; }
+    public DateTime? RentalHistoryImportedAt { get; set; }
     public DateTime FirstSeenAt { get; set; }
     public DateTime LastSeenAt { get; set; }
     public DateTime LastUpdatedAt { get; set; }
