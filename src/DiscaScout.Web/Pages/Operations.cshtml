@@ -14,6 +14,8 @@
         :root { color-scheme: light; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
         body { margin: 0; background: #f6f7f9; color: #20242a; }
         main { max-width: 1180px; margin: 0 auto; padding: 28px; }
+        nav { display: flex; gap: 14px; margin-bottom: 18px; font-size: 14px; }
+        nav a { color: #165dce; text-decoration: none; }
         h1 { margin: 0 0 6px; font-size: 28px; }
         h2 { margin-top: 0; font-size: 19px; }
         .muted { color: #68707c; font-size: 14px; }
@@ -42,6 +44,7 @@
 </head>
 <body>
 <main>
+    <nav><a href="/discs">CD一覧</a><a href="/artists">Artist設定</a><a href="/operations">運用</a></nav>
     <h1>DiscaScout 運用</h1>
     <div class="muted">定期取得、手動取得、Retry予定、直近の実行履歴を管理します。</div>
 
@@ -82,38 +85,33 @@
 
         <section class="card">
             <h2>手動取得</h2>
-            <p class="muted">近日リリースと新作を順番に取得します。要求後はバックグラウンドで処理するため、画面を閉じても継続します。</p>
             <form method="post" asp-page-handler="RunNow">
-                @if (Model.IsFullScrapeActive)
-                {
-                    <button class="primary" type="submit" disabled>取得中 / 待機中</button>
-                }
-                else
-                {
-                    <button class="primary" type="submit">今すぐ取得</button>
-                }
+                <button class="primary" type="submit" disabled="@Model.IsManualWorkActive">今すぐ取得</button>
             </form>
-            <p class="muted">手動要求・Retry・定期取得は同時実行せず、DISCASへのアクセスを直列化します。</p>
+            <div class="muted" style="margin-top: 12px;">新作・近日リリースをバックグラウンドで取得します。</div>
         </section>
 
         <section class="card full">
             <h2>手動処理キュー</h2>
-            @if (Model.ActiveManualWork.Count == 0)
+            @if (Model.ActiveManualWorks.Count == 0 && Model.RecentManualWorks.Count == 0)
             {
-                <div class="empty">保留中・実行中の手動処理はありません。</div>
+                <div class="empty">手動処理履歴はありません。</div>
             }
             else
             {
                 <table>
-                    <thead><tr><th>種別</th><th>状態</th><th>要求時刻（JST）</th><th>対象</th></tr></thead>
+                    <thead><tr><th>状態</th><th>種別</th><th>対象</th><th>要求日時</th><th>開始</th><th>完了</th><th>失敗理由</th></tr></thead>
                     <tbody>
-                    @foreach (var work in Model.ActiveManualWork)
+                    @foreach (var work in Model.ActiveManualWorks.Concat(Model.RecentManualWorks))
                     {
                         <tr>
-                            <td>@(work.Type == ManualWorkType.FullScrape ? "通常取得" : "Artist全作品")</td>
-                            <td class="@(work.Status == ManualWorkStatus.Running ? "running" : "pending")">@(work.Status == ManualWorkStatus.Running ? "実行中" : "待機中")</td>
-                            <td>@OperationsModel.ToJapanTime(work.RequestedAt).ToString("yyyy-MM-dd HH:mm:ss")</td>
+                            <td class="@(work.Status == ManualWorkStatus.Running ? "running" : work.Status == ManualWorkStatus.Pending ? "pending" : work.Status == ManualWorkStatus.Completed ? "ok" : "ng")">@OperationsModel.FormatManualWorkStatus(work.Status)</td>
+                            <td>@OperationsModel.FormatManualWorkType(work.Type)</td>
                             <td>@(work.ArtistSettingId?.ToString() ?? "-")</td>
+                            <td>@OperationsModel.FormatJapanTime(work.RequestedAt)</td>
+                            <td>@OperationsModel.FormatJapanTime(work.StartedAt)</td>
+                            <td>@OperationsModel.FormatJapanTime(work.CompletedAt)</td>
+                            <td class="error">@(work.FailureReason ?? "-")</td>
                         </tr>
                     }
                     </tbody>
@@ -122,88 +120,36 @@
         </section>
 
         <section class="card full">
-            <h2>手動処理履歴</h2>
-            @if (Model.RecentManualWork.Count == 0)
-            {
-                <div class="empty">手動処理履歴はまだありません。</div>
-            }
-            else
-            {
-                <table>
-                    <thead><tr><th>要求（JST）</th><th>種別</th><th>状態</th><th>対象</th><th>完了（JST）</th><th>失敗理由</th></tr></thead>
-                    <tbody>
-                    @foreach (var work in Model.RecentManualWork)
-                    {
-                        <tr>
-                            <td>@OperationsModel.ToJapanTime(work.RequestedAt).ToString("yyyy-MM-dd HH:mm:ss")</td>
-                            <td>@(work.Type == ManualWorkType.FullScrape ? "通常取得" : "Artist全作品")</td>
-                            <td class="@(work.Status == ManualWorkStatus.Completed ? "ok" : work.Status == ManualWorkStatus.Failed ? "ng" : work.Status == ManualWorkStatus.Running ? "running" : "pending")">@work.Status</td>
-                            <td>@(work.ArtistSettingId?.ToString() ?? "-")</td>
-                            <td>@(work.CompletedAt.HasValue ? OperationsModel.ToJapanTime(work.CompletedAt.Value).ToString("yyyy-MM-dd HH:mm:ss") : "-")</td>
-                            <td class="error">@(work.FailureReason ?? "")</td>
-                        </tr>
-                    }
-                    </tbody>
-                </table>
-            }
-        </section>
-
-        <section class="card full">
-            <h2>保留中のRetry</h2>
+            <h2>Retry予定</h2>
             @if (Model.PendingRetries.Count == 0)
             {
-                <div class="empty">保留中のRetryはありません。</div>
+                <div class="empty">予定されているRetryはありません。</div>
             }
             else
             {
-                <table>
-                    <thead><tr><th>カテゴリ</th><th>回数</th><th>予定時刻（JST）</th></tr></thead>
-                    <tbody>
-                    @foreach (var retry in Model.PendingRetries)
-                    {
-                        <tr>
-                            <td>@retry.Category</td>
-                            <td>@retry.AttemptNumber</td>
-                            <td>@OperationsModel.ToJapanTime(retry.DueAt).ToString("yyyy-MM-dd HH:mm:ss")</td>
-                        </tr>
-                    }
-                    </tbody>
-                </table>
+                <table><thead><tr><th>カテゴリ</th><th>回数</th><th>予定日時</th><th>状態</th></tr></thead><tbody>
+                @foreach (var retry in Model.PendingRetries)
+                {
+                    <tr><td>@retry.Category</td><td>@retry.Attempt</td><td>@OperationsModel.FormatJapanTime(retry.DueAt)</td><td>@retry.Status</td></tr>
+                }
+                </tbody></table>
             }
         </section>
 
         <section class="card full">
-            <h2>実行履歴</h2>
+            <h2>直近の実行履歴</h2>
             @if (Model.RecentRuns.Count == 0)
             {
-                <div class="empty">実行履歴はまだありません。</div>
+                <div class="empty">実行履歴はありません。</div>
             }
             else
             {
-                <table>
-                    <thead>
-                    <tr>
-                        <th>開始（JST）</th><th>種別</th><th>カテゴリ</th><th>結果</th>
-                        <th>件数</th><th>追加</th><th>更新</th><th>時間</th><th>失敗理由</th>
-                    </tr>
-                    </thead>
-                    <tbody>
-                    @foreach (var run in Model.RecentRuns)
-                    {
-                        <tr>
-                            <td>@OperationsModel.ToJapanTime(run.StartedAt).ToString("yyyy-MM-dd HH:mm:ss")</td>
-                            <td>@run.ExecutionType</td>
-                            <td>@run.Category</td>
-                            <td class="@(run.IsSuccess ? "ok" : "ng")">@(run.IsSuccess ? "成功" : "失敗")</td>
-                            <td>@(run.ParsedCount?.ToString() ?? "-")</td>
-                            <td>@run.AddedCount</td>
-                            <td>@run.UpdatedCount</td>
-                            <td>@(TimeSpan.FromMilliseconds(run.DurationMilliseconds).ToString(@"hh\:mm\:ss"))</td>
-                            <td class="error">@(run.FailureReason ?? "")</td>
-                        </tr>
-                    }
-                    </tbody>
-                </table>
+                <table><thead><tr><th>開始</th><th>種別</th><th>カテゴリ</th><th>結果</th><th>取得件数</th><th>失敗理由</th></tr></thead><tbody>
+                @foreach (var run in Model.RecentRuns)
+                {
+                    <tr><td>@OperationsModel.FormatJapanTime(run.StartedAt)</td><td>@run.ExecutionType</td><td>@run.Category</td><td class="@(run.IsSuccess ? "ok" : "ng")">@(run.IsSuccess ? "成功" : "失敗")</td><td>@(run.FetchedCount?.ToString() ?? "-")</td><td class="error">@(run.FailureReason ?? "-")</td></tr>
+                }
+                </tbody></table>
             }
         </section>
     </div>
