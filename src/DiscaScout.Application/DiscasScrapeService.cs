@@ -8,7 +8,8 @@ namespace DiscaScout.Application;
 /// </summary>
 public sealed class DiscasScrapeService(
     IDiscasCategoryCrawler crawler,
-    IDiscasSnapshotStore snapshotStore)
+    IDiscasSnapshotStore snapshotStore,
+    DiscImageCacheService? imageCache = null)
 {
     private static readonly DiscSourceCategory[] DefaultCategories =
     [
@@ -54,6 +55,14 @@ public sealed class DiscasScrapeService(
                 cancellationToken);
 
             var applyResult = await snapshotStore.ApplyAsync(snapshot, cancellationToken);
+
+            // 画像はカテゴリスナップショットとは独立した副次データなので、DB反映後に同期する。
+            // DiscImageCacheService自身が画像単位の失敗を吸収しImagePathを維持するため、
+            // 一部画像が取得できなくても正常なカテゴリクロールを失敗扱いにはしない。
+            if (imageCache is not null)
+            {
+                await imageCache.SyncAsync(snapshot.Products.Select(x => x.DiscasId), cancellationToken);
+            }
 
             return CategoryScrapeResult.Success(
                 category,
