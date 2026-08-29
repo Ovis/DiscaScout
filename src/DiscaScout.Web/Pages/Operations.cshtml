@@ -136,7 +136,7 @@
                             <td>@(run.ParsedCount?.ToString() ?? "-")</td>
                             <td>@run.AddedCount</td>
                             <td>@run.UpdatedCount</td>
-                            <td>@TimeSpan.FromMilliseconds(run.DurationMilliseconds).ToString(@"hh\:mm\:ss")</td>
+                            <td>@(TimeSpan.FromMilliseconds(run.DurationMilliseconds).ToString(@"hh\:mm\:ss"))</td>
                             <td class="error">@(run.FailureReason ?? "")</td>
                         </tr>
                     }
