@@ -14,6 +14,7 @@ public sealed class DiscaScoutDbContext(DbContextOptions<DiscaScoutDbContext> op
     public DbSet<DiscChangeHistory> DiscChangeHistory => Set<DiscChangeHistory>();
     public DbSet<ArtistSetting> ArtistSettings => Set<ArtistSetting>();
     public DbSet<DiscArtistMatch> DiscArtistMatches => Set<DiscArtistMatch>();
+    public DbSet<DiscArtistCatalog> DiscArtistCatalogs => Set<DiscArtistCatalog>();
     public DbSet<ScrapeRun> ScrapeRuns => Set<ScrapeRun>();
     public DbSet<ScrapeRetry> ScrapeRetries => Set<ScrapeRetry>();
     public DbSet<ScrapeScheduleSettings> ScrapeScheduleSettings => Set<ScrapeScheduleSettings>();
@@ -87,6 +88,19 @@ public sealed class DiscaScoutDbContext(DbContextOptions<DiscaScoutDbContext> op
             .OnDelete(DeleteBehavior.Cascade);
         artistMatch.HasOne(x => x.ArtistSetting)
             .WithMany(x => x.DiscMatches)
+            .HasForeignKey(x => x.ArtistSettingId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        var artistCatalog = modelBuilder.Entity<DiscArtistCatalog>();
+        artistCatalog.HasKey(x => x.Id);
+        artistCatalog.HasIndex(x => new { x.DiscId, x.ArtistSettingId }).IsUnique();
+        artistCatalog.HasIndex(x => new { x.ArtistSettingId, x.IsActive });
+        artistCatalog.HasOne(x => x.Disc)
+            .WithMany(x => x.ArtistCatalogEntries)
+            .HasForeignKey(x => x.DiscId)
+            .OnDelete(DeleteBehavior.Cascade);
+        artistCatalog.HasOne(x => x.ArtistSetting)
+            .WithMany(x => x.CatalogEntries)
             .HasForeignKey(x => x.ArtistSettingId)
             .OnDelete(DeleteBehavior.Cascade);
 
