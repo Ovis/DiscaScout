@@ -15,7 +15,7 @@ using var httpClient = new HttpClient(handler)
     Timeout = TimeSpan.FromSeconds(30)
 };
 
-var fetcher = new DiscasPageFetcher(httpClient);
+var fetcher = new DiscasPageFetcher(httpClient, new DiscasRequestThrottle());
 var parser = new DiscasSearchResultParser();
 var outputDirectory = Path.Combine(Environment.CurrentDirectory, "artifacts", "probe");
 Directory.CreateDirectory(outputDirectory);
