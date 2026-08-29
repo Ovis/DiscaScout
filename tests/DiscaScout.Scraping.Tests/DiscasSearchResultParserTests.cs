@@ -32,6 +32,9 @@ public sealed class DiscasSearchResultParserTests
             first.ProductUrl);
         Assert.Equal("機動警察パトレイバー Early Days MUSIC COLLECTION CD BOX【Disc.5&Disc.6】", first.Title);
         Assert.Equal("機動警察パトレイバー", first.Artist);
+        Assert.Equal("アニメ／ゲーム", first.GenreLarge);
+        Assert.Equal("アニメ", first.GenreMiddle);
+        Assert.Null(first.GenreSmall);
         Assert.Equal(
             "https://img.discas.net/img/jacket/core/202607/16/4540774391875_1SX.jpg",
             first.ImageUrl);
@@ -43,6 +46,9 @@ public sealed class DiscasSearchResultParserTests
         Assert.Equal("7635390762", second.DiscasId);
         Assert.Equal("#アニソンジャズ FIRST", second.Title);
         Assert.Equal("#アニソンジャズ", second.Artist);
+        Assert.Equal("アニメ／ゲーム", second.GenreLarge);
+        Assert.Equal("アニメ", second.GenreMiddle);
+        Assert.Equal("ジャズ", second.GenreSmall);
         Assert.Null(second.ImageUrl);
         Assert.Equal(42, second.SourceRank);
     }
@@ -78,6 +84,9 @@ public sealed class DiscasSearchResultParserTests
               </div>
               <img class="card-img" src="https://img.discas.net/example.jpg">
             </div>
+            <script>
+              var itemTopGATag123 = {event:'teigaku_search_cd', category:'CD', genre_large:'J-POP', genre_mid:'J-POP', genre_min:'null', titleid:'123'};
+            </script>
             """;
         var parser = new DiscasSearchResultParser();
 
@@ -88,7 +97,7 @@ public sealed class DiscasSearchResultParserTests
     }
 
     /// <summary>
-    /// 通常リンクを生成できないアーティストが専用見出しに表示されるケースを解析できることを確認する
+    /// 通常のアーティスト見出しがない商品でも専用見出しから表示名を取得できることを確認する
     /// </summary>
     [Fact]
     public void Parse_UnavailableArtistMarkup_UsesFallbackHeading()
@@ -97,12 +106,15 @@ public sealed class DiscasSearchResultParserTests
             <div class="cd-product-item">
               <div class="card-body-searchCd">
                 <h3 class="cd-search-product-title">
-                  <a class="card-title-searchCd" href="goodsDetail.do?titleID=7635390756">【MAXI】Which Way is Love?(マキシシングル)</a>
+                  <a class="card-title-searchCd" href="goodsDetail.do?titleID=123">Title</a>
                 </h3>
                 <h3 class="cd-search-artist-not-available">トレンドジ―</h3>
               </div>
               <img class="card-img" src="https://img.discas.net/example.jpg">
             </div>
+            <script>
+              var itemTopGATag123 = {event:'teigaku_search_cd', category:'CD', genre_large:'J-POP', genre_mid:'J-POP', genre_min:'null', titleid:'123'};
+            </script>
             """;
         var parser = new DiscasSearchResultParser();
 
@@ -113,10 +125,10 @@ public sealed class DiscasSearchResultParserTests
     }
 
     /// <summary>
-    /// 通常・フォールバックのどちらにもアーティスト表示がない商品を正常データとして扱わないことを確認する
+    /// ジャンル情報が欠落した商品を正常データとして扱わないことを確認する
     /// </summary>
     [Fact]
-    public void Parse_ProductWithoutArtistDisplay_ThrowsParseException()
+    public void Parse_ProductWithoutGenreMetadata_ThrowsParseException()
     {
         const string html = """
             <div class="cd-product-item">
@@ -124,8 +136,8 @@ public sealed class DiscasSearchResultParserTests
                 <h3 class="cd-search-product-title">
                   <a class="card-title-searchCd" href="goodsDetail.do?titleID=123">Title</a>
                 </h3>
+                <h3 class="cd-search-product-title">Artist</h3>
               </div>
-              <img class="card-img" src="https://img.discas.net/example.jpg">
             </div>
             """;
         var parser = new DiscasSearchResultParser();
@@ -133,7 +145,7 @@ public sealed class DiscasSearchResultParserTests
         var exception = Assert.Throws<DiscasSearchParseException>(
             () => parser.Parse(html, PageUri, DiscSourceCategory.New));
 
-        Assert.Contains("アーティスト表示", exception.Message);
+        Assert.Contains("ジャンル情報", exception.Message);
     }
 
     /// <summary>

@@ -7,6 +7,9 @@ namespace DiscaScout.Scraping;
 /// <param name="ProductUrl">DISCASの商品詳細URL</param>
 /// <param name="Title">検索結果に表示されたタイトル</param>
 /// <param name="Artist">検索結果に表示されたアーティスト</param>
+/// <param name="GenreLarge">DISCASの商品メタデータに含まれる大ジャンル</param>
+/// <param name="GenreMiddle">DISCASの商品メタデータに含まれる中ジャンル。値がない場合はnull</param>
+/// <param name="GenreSmall">DISCASの商品メタデータに含まれる小ジャンル。値がない場合はnull</param>
 /// <param name="ImageUrl">ジャケット画像URL。DISCASの画像未登録プレースホルダーの場合はnull</param>
 /// <param name="RentalStartDate">レンタル開始日。検索結果から取得できない場合はnull</param>
 /// <param name="Category">この検索結果を取得したリリースカテゴリ</param>
@@ -16,6 +19,9 @@ public sealed record ScrapedDisc(
     string ProductUrl,
     string Title,
     string Artist,
+    string GenreLarge,
+    string? GenreMiddle,
+    string? GenreSmall,
     string? ImageUrl,
     DateOnly? RentalStartDate,
     DiscSourceCategory Category,

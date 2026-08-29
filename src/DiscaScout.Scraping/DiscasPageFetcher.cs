@@ -9,8 +9,12 @@ namespace DiscaScout.Scraping;
 public sealed class DiscasPageFetcher
 {
     private const string ChromeUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36";
+    private static readonly TimeSpan DefaultMinimumRequestInterval = TimeSpan.FromSeconds(2);
 
     private readonly HttpClient httpClient;
+    private readonly TimeSpan minimumRequestInterval;
+    private readonly SemaphoreSlim requestGate = new(1, 1);
+    private DateTimeOffset? lastRequestStartedAt;
 
     static DiscasPageFetcher()
     {
@@ -25,8 +29,26 @@ public sealed class DiscasPageFetcher
     /// </summary>
     /// <param name="httpClient">HTTP通信に使用するクライアント</param>
     public DiscasPageFetcher(HttpClient httpClient)
+        : this(httpClient, DefaultMinimumRequestInterval)
     {
+    }
+
+    /// <summary>
+    /// テスト用にリクエスト間隔を指定してDISCASページ取得クライアントを初期化する
+    /// </summary>
+    /// <param name="httpClient">HTTP通信に使用するクライアント</param>
+    /// <param name="minimumRequestInterval">リクエスト開始時刻の最低間隔</param>
+    internal DiscasPageFetcher(HttpClient httpClient, TimeSpan minimumRequestInterval)
+    {
+        ArgumentNullException.ThrowIfNull(httpClient);
+
+        if (minimumRequestInterval < TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(minimumRequestInterval));
+        }
+
         this.httpClient = httpClient;
+        this.minimumRequestInterval = minimumRequestInterval;
     }
 
     /// <summary>
@@ -37,32 +59,63 @@ public sealed class DiscasPageFetcher
     /// <returns>HTTPステータス、最終URL、文字コード、HTML本文を含む取得結果</returns>
     public async Task<FetchResult> FetchAsync(Uri uri, CancellationToken cancellationToken = default)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+        ArgumentNullException.ThrowIfNull(uri);
 
-        // DISCAS側に通常のデスクトップブラウザからのアクセスと同等のUser-Agentを送る。
-        // 独自CrawlerのUser-Agentによって通常ブラウザと異なるレスポンスになる可能性を避けるため固定している。
-        request.Headers.UserAgent.ParseAdd(ChromeUserAgent);
-        request.Headers.AcceptLanguage.ParseAdd("ja-JP,ja;q=0.9,en;q=0.5");
+        // DISCASへの短時間の連続アクセスと並列アクセスを避けるため、取得処理全体を直列化する。
+        // リクエスト開始時刻も最低2秒空けることで、呼び出し元がCrawler・手動実行・Retryのどれであっても
+        // 相手サーバーへのアクセス頻度を同じ制約内に収める。
+        await requestGate.WaitAsync(cancellationToken);
+        try
+        {
+            await WaitForRequestIntervalAsync(cancellationToken);
+            lastRequestStartedAt = DateTimeOffset.UtcNow;
 
-        using var response = await httpClient.SendAsync(
-            request,
-            HttpCompletionOption.ResponseHeadersRead,
-            cancellationToken);
+            using var request = new HttpRequestMessage(HttpMethod.Get, uri);
 
-        var charset = response.Content.Headers.ContentType?.CharSet;
+            // DISCAS側に通常のデスクトップブラウザからのアクセスと同等のUser-Agentを送る。
+            // 独自CrawlerのUser-Agentによって通常ブラウザと異なるレスポンスになる可能性を避けるため固定している。
+            request.Headers.UserAgent.ParseAdd(ChromeUserAgent);
+            request.Headers.AcceptLanguage.ParseAdd("ja-JP,ja;q=0.9,en;q=0.5");
 
-        // ReadAsStringAsyncはContent-TypeのcharsetをそのままEncoding.GetEncodingへ渡すため、
-        // DISCASが返す「Windows-31J」のような.NETで認識されない別名が含まれると例外になる。
-        // そのため本文はバイト列で取得し、DISCAS固有のcharset表記をこちらでCP932へ正規化してからデコードする。
-        var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
-        var encoding = ResolveEncoding(charset);
-        var html = encoding.GetString(bytes);
+            using var response = await httpClient.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken);
 
-        return new FetchResult(
-            response.StatusCode,
-            response.RequestMessage?.RequestUri ?? uri,
-            charset,
-            html);
+            var charset = response.Content.Headers.ContentType?.CharSet;
+
+            // ReadAsStringAsyncはContent-TypeのcharsetをそのままEncoding.GetEncodingへ渡すため、
+            // DISCASが返す「Windows-31J」のような.NETで認識されない別名が含まれると例外になる。
+            // そのため本文はバイト列で取得し、DISCAS固有のcharset表記をこちらでCP932へ正規化してからデコードする。
+            var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+            var encoding = ResolveEncoding(charset);
+            var html = encoding.GetString(bytes);
+
+            return new FetchResult(
+                response.StatusCode,
+                response.RequestMessage?.RequestUri ?? uri,
+                charset,
+                html);
+        }
+        finally
+        {
+            requestGate.Release();
+        }
+    }
+
+    private async Task WaitForRequestIntervalAsync(CancellationToken cancellationToken)
+    {
+        if (lastRequestStartedAt is null || minimumRequestInterval == TimeSpan.Zero)
+        {
+            return;
+        }
+
+        var elapsed = DateTimeOffset.UtcNow - lastRequestStartedAt.Value;
+        var remaining = minimumRequestInterval - elapsed;
+        if (remaining > TimeSpan.Zero)
+        {
+            await Task.Delay(remaining, cancellationToken);
+        }
     }
 
     /// <summary>
