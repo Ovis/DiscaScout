@@ -153,6 +153,26 @@ public sealed class ManualWorkStore(DiscaScoutDbContext dbContext)
             .ToListAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// 画面表示用に直近の手動処理要求を新しい順で取得する
+    /// </summary>
+    public async Task<IReadOnlyList<ManualWorkItem>> GetRecentAsync(
+        int count,
+        CancellationToken cancellationToken = default)
+    {
+        if (count <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(count));
+        }
+
+        return await dbContext.ManualWorkItems
+            .AsNoTracking()
+            .OrderByDescending(x => x.RequestedAt)
+            .ThenByDescending(x => x.Id)
+            .Take(count)
+            .ToListAsync(cancellationToken);
+    }
+
     private static string? Truncate(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
