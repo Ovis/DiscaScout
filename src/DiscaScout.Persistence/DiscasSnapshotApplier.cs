@@ -30,10 +30,14 @@ public sealed class DiscasSnapshotApplier(DiscaScoutDbContext dbContext, TimePro
         // 新規追加だけ残るような状態を避けて全変更をロールバックする。
         await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
+        var artistSettings = await dbContext.ArtistSettings
+            .Where(x => !x.IsArchived)
+            .ToListAsync(cancellationToken);
         var discs = await dbContext.Discs
             .Include(x => x.Sources)
             .Include(x => x.ReviewReasons)
             .Include(x => x.ChangeHistory)
+            .Include(x => x.ArtistMatches)
             .ToListAsync(cancellationToken);
         var byDiscasId = discs.ToDictionary(x => x.DiscasId, StringComparer.Ordinal);
         var seenIds = new HashSet<string>(StringComparer.Ordinal);
@@ -50,6 +54,7 @@ public sealed class DiscasSnapshotApplier(DiscaScoutDbContext dbContext, TimePro
                 disc = CreateDisc(scraped, now);
                 disc.Sources.Add(CreateSource(category, scraped.SourceRank, now));
                 AddReviewReason(disc, DiscReviewReasonType.New, now);
+                ArtistWatchService.ApplyCurrentMatches(disc, artistSettings, now);
                 dbContext.Discs.Add(disc);
                 discs.Add(disc);
                 byDiscasId.Add(disc.DiscasId, disc);
@@ -59,6 +64,11 @@ public sealed class DiscasSnapshotApplier(DiscaScoutDbContext dbContext, TimePro
 
             var wasArchived = disc.IsArchived;
             var changed = ApplyMetadata(disc, scraped, now);
+
+            // Artist表記が変わった場合を含め、現在の正規化済みArtistに対してWatchを再評価する。
+            // 継続一致では状態を変更しないため、週次クロールのたびにInboxが再オープンすることはない。
+            changed |= ArtistWatchService.ApplyCurrentMatches(disc, artistSettings, now);
+
             var source = disc.Sources.SingleOrDefault(x => x.Category == category);
             if (source is null)
             {
