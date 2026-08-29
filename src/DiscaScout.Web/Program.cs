@@ -58,8 +58,32 @@ await using (var scope = app.Services.CreateAsyncScope())
     await dbContext.Database.MigrateAsync();
 }
 
-app.MapGet("/", () => Results.Redirect("/operations"));
+app.MapGet("/", () => Results.Redirect("/discs"));
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+app.MapGet("/disc-image/{id:long}", async (long id, DiscaScoutDbContext dbContext, CancellationToken cancellationToken) =>
+{
+    var imagePath = await dbContext.Discs
+        .AsNoTracking()
+        .Where(x => x.Id == id)
+        .Select(x => x.ImagePath)
+        .SingleOrDefaultAsync(cancellationToken);
+
+    if (string.IsNullOrWhiteSpace(imagePath) || !File.Exists(imagePath))
+    {
+        return Results.NotFound();
+    }
+
+    var contentType = Path.GetExtension(imagePath).ToLowerInvariant() switch
+    {
+        ".png" => "image/png",
+        ".webp" => "image/webp",
+        ".gif" => "image/gif",
+        _ => "image/jpeg"
+    };
+
+    // DBに保存済みのキャッシュファイルだけをID経由で返し、任意パスをURLから指定できないようにする。
+    return Results.File(imagePath, contentType, enableRangeProcessing: false);
+});
 app.MapRazorPages();
 
 await app.RunAsync();
