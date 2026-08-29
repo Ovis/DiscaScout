@@ -127,10 +127,11 @@ public sealed class DiscasScrapeServiceTests
         Assert.True(result.IsSuccess);
         Assert.False(result.CountDropOverrideUsed);
         Assert.Equal([DiscSourceCategory.New], store.AppliedCategories);
+        Assert.Equal([false], store.ConsumeCountDropOverrideFlags);
     }
 
     [Fact]
-    public async Task ExecuteCategoryAsync_急減許可中は反映成功後にだけ許可を消費する()
+    public async Task ExecuteCategoryAsync_急減許可中は永続化層へ同一トランザクションでの許可消費を要求する()
     {
         var crawler = new StubCrawler();
         crawler.AddSuccess(DiscSourceCategory.New, CreateSnapshot(DiscSourceCategory.New, 60));
@@ -150,8 +151,7 @@ public sealed class DiscasScrapeServiceTests
 
         Assert.True(result.IsSuccess);
         Assert.True(result.CountDropOverrideUsed);
-        Assert.Equal(1, guard.ConsumeCount);
-        Assert.False(guard.Settings[ScrapeCategory.New].IsCountDropOverrideEnabled);
+        Assert.Equal([true], store.ConsumeCountDropOverrideFlags);
     }
 
     private static DiscasScrapeService CreateService(
@@ -235,19 +235,21 @@ public sealed class DiscasScrapeServiceTests
     }
 
     /// <summary>
-    /// 呼び出されたカテゴリを記録するテスト用永続化処理
+    /// 呼び出されたカテゴリと急減許可消費指定を記録するテスト用永続化処理
     /// </summary>
     private sealed class StubSnapshotStore : IDiscasSnapshotStore
     {
         public List<DiscSourceCategory> AppliedCategories { get; } = [];
-
+        public List<bool> ConsumeCountDropOverrideFlags { get; } = [];
         public Dictionary<DiscSourceCategory, Exception> Failures { get; } = [];
 
         public Task<SnapshotApplyResult> ApplyAsync(
             DiscasCategorySnapshot snapshot,
+            bool consumeCountDropOverride = false,
             CancellationToken cancellationToken = default)
         {
             AppliedCategories.Add(snapshot.Category);
+            ConsumeCountDropOverrideFlags.Add(consumeCountDropOverride);
             cancellationToken.ThrowIfCancellationRequested();
 
             if (Failures.TryGetValue(snapshot.Category, out var exception))
@@ -276,12 +278,11 @@ public sealed class DiscasScrapeServiceTests
     }
 
     /// <summary>
-    /// 急減許可の状態と消費回数を記録するテスト用ストア
+    /// 急減許可の状態を返すテスト用ストア
     /// </summary>
     private sealed class StubScrapeGuardStore : IScrapeGuardStore
     {
         public Dictionary<ScrapeCategory, ScrapeGuardSettings> Settings { get; } = [];
-        public int ConsumeCount { get; private set; }
 
         public Task<ScrapeGuardSettings> GetAsync(ScrapeCategory category, CancellationToken cancellationToken = default)
             => Task.FromResult(Settings.GetValueOrDefault(category) ?? new ScrapeGuardSettings { Category = category });
@@ -299,9 +300,6 @@ public sealed class DiscasScrapeServiceTests
         }
 
         public Task ConsumeCountDropOverrideAsync(ScrapeCategory category, CancellationToken cancellationToken = default)
-        {
-            ConsumeCount++;
-            return CancelCountDropOverrideAsync(category, cancellationToken);
-        }
+            => CancelCountDropOverrideAsync(category, cancellationToken);
     }
 }
