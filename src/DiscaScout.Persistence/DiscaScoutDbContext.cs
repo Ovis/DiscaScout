@@ -12,6 +12,8 @@ public sealed class DiscaScoutDbContext(DbContextOptions<DiscaScoutDbContext> op
     public DbSet<DiscSource> DiscSources => Set<DiscSource>();
     public DbSet<DiscReviewReason> DiscReviewReasons => Set<DiscReviewReason>();
     public DbSet<DiscChangeHistory> DiscChangeHistory => Set<DiscChangeHistory>();
+    public DbSet<ScrapeRun> ScrapeRuns => Set<ScrapeRun>();
+    public DbSet<ScrapeRetry> ScrapeRetries => Set<ScrapeRetry>();
 
     /// <summary>
     /// ドメインモデルとSQLiteテーブルの制約・インデックスを構成する
@@ -64,5 +66,16 @@ public sealed class DiscaScoutDbContext(DbContextOptions<DiscaScoutDbContext> op
             .WithMany(x => x.ChangeHistory)
             .HasForeignKey(x => x.DiscId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        var scrapeRun = modelBuilder.Entity<ScrapeRun>();
+        scrapeRun.HasKey(x => x.Id);
+        scrapeRun.Property(x => x.FailureReason).HasMaxLength(1000);
+        scrapeRun.HasIndex(x => new { x.Category, x.StartedAt });
+        scrapeRun.HasIndex(x => x.IsSuccess);
+
+        var scrapeRetry = modelBuilder.Entity<ScrapeRetry>();
+        scrapeRetry.HasKey(x => x.Id);
+        scrapeRetry.HasIndex(x => new { x.Status, x.DueAt });
+        scrapeRetry.HasIndex(x => new { x.Category, x.Status });
     }
 }
