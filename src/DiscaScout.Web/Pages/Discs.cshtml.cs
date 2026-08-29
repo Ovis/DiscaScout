@@ -40,7 +40,7 @@ public sealed class DiscsModel(DiscaScoutDbContext dbContext) : PageModel
     public int PageNumber { get; set; } = 1;
 
     public IReadOnlyList<Disc> Items { get; private set; } = [];
-    public IReadOnlyList<string> GenreOptions { get; private set; } = [];
+    public IReadOnlyList<GenreGroup> GenreGroups { get; private set; } = [];
     public int UncheckedCount { get; private set; }
     public int PickupCount { get; private set; }
     public int TotalCount { get; private set; }
@@ -57,7 +57,7 @@ public sealed class DiscsModel(DiscaScoutDbContext dbContext) : PageModel
         NormalizeInputs();
         UncheckedCount = await dbContext.Discs.CountAsync(x => x.NeedsReview && !x.IsRented && !x.IsArchived, cancellationToken);
         PickupCount = await dbContext.Discs.CountAsync(x => x.ArtistMatches.Any(m => m.IsCurrentMatch && !m.ArtistSetting.IsArchived && m.ArtistSetting.IsWatchEnabled), cancellationToken);
-        GenreOptions = await LoadGenreOptionsAsync(cancellationToken);
+        GenreGroups = await LoadGenreGroupsAsync(cancellationToken);
 
         var query = dbContext.Discs
             .AsNoTracking()
@@ -210,6 +210,8 @@ public sealed class DiscsModel(DiscaScoutDbContext dbContext) : PageModel
         }
         if (!string.IsNullOrWhiteSpace(Genre))
         {
+            // 各CDは大・中・小ジャンルを同時に保持しているため、大ジャンルを指定すれば
+            // その配下の中・小ジャンルを持つCDもGenreLargeの一致によって自然に含まれる。
             query = query.Where(x => x.GenreLarge == Genre || x.GenreMiddle == Genre || x.GenreSmall == Genre);
         }
         return query;
@@ -234,12 +236,35 @@ public sealed class DiscsModel(DiscaScoutDbContext dbContext) : PageModel
         _ => query.OrderByDescending(x => x.LastUpdatedAt).ThenByDescending(x => x.Id)
     };
 
-    private async Task<IReadOnlyList<string>> LoadGenreOptionsAsync(CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<GenreGroup>> LoadGenreGroupsAsync(CancellationToken cancellationToken)
     {
-        var large = await dbContext.Discs.Select(x => x.GenreLarge).Distinct().ToListAsync(cancellationToken);
-        var middle = await dbContext.Discs.Where(x => x.GenreMiddle != null).Select(x => x.GenreMiddle!).Distinct().ToListAsync(cancellationToken);
-        var small = await dbContext.Discs.Where(x => x.GenreSmall != null).Select(x => x.GenreSmall!).Distinct().ToListAsync(cancellationToken);
-        return large.Concat(middle).Concat(small).Distinct(StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal).ToArray();
+        // GenreLarge/Middle/Smallは独立したマスタではなくCDに付随して観測されるため、
+        // 実データ上の組み合わせから親子関係を復元し、存在しない階層を推測しない。
+        var genres = await dbContext.Discs
+            .AsNoTracking()
+            .Select(x => new { x.GenreLarge, x.GenreMiddle, x.GenreSmall })
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        return genres
+            .GroupBy(x => x.GenreLarge, StringComparer.Ordinal)
+            .OrderBy(x => x.Key, StringComparer.Ordinal)
+            .Select(largeGroup => new GenreGroup(
+                largeGroup.Key,
+                largeGroup
+                    .Where(x => !string.IsNullOrWhiteSpace(x.GenreMiddle))
+                    .GroupBy(x => x.GenreMiddle!, StringComparer.Ordinal)
+                    .OrderBy(x => x.Key, StringComparer.Ordinal)
+                    .Select(middleGroup => new GenreMiddleGroup(
+                        middleGroup.Key,
+                        middleGroup
+                            .Where(x => !string.IsNullOrWhiteSpace(x.GenreSmall))
+                            .Select(x => x.GenreSmall!)
+                            .Distinct(StringComparer.Ordinal)
+                            .OrderBy(x => x, StringComparer.Ordinal)
+                            .ToArray()))
+                    .ToArray()))
+            .ToArray();
     }
 
     private void SetUndoPayload(Disc disc)
@@ -284,6 +309,16 @@ public sealed class DiscsModel(DiscaScoutDbContext dbContext) : PageModel
         if (page > 1) values["p"] = page.ToString();
         return QueryHelpers.AddQueryString("/discs", values);
     }
+
+    /// <summary>
+    /// 一覧のジャンル選択肢で表示する大ジャンルと、その配下の中ジャンルを表す
+    /// </summary>
+    public sealed record GenreGroup(string Name, IReadOnlyList<GenreMiddleGroup> MiddleGenres);
+
+    /// <summary>
+    /// 一覧のジャンル選択肢で表示する中ジャンルと、その配下の小ジャンルを表す
+    /// </summary>
+    public sealed record GenreMiddleGroup(string Name, IReadOnlyList<string> SmallGenres);
 
     private sealed record ReviewUndoState(long DiscId, bool IsRented, bool NeedsReview, DateTime? LastReviewedAt, IReadOnlyList<ReviewReasonUndoState> Reasons);
     private sealed record ReviewReasonUndoState(DiscReviewReasonType Reason, DateTime CreatedAt);
