@@ -63,14 +63,43 @@ public sealed class DiscasSearchResultParserTests
     }
 
     /// <summary>
-    /// 必須のアーティストDOMが欠落した商品を正常データとして扱わないことを確認する
+    /// アーティスト名にリンクがなくても表示見出しから取得できることを確認する
     /// </summary>
     [Fact]
-    public void Parse_ProductWithoutArtist_ThrowsParseException()
+    public void Parse_ArtistWithoutLink_UsesSecondProductTitleHeading()
     {
         const string html = """
             <div class="cd-product-item">
-              <a class="card-title-searchCd" href="goodsDetail.do?titleID=123">Title</a>
+              <div class="card-body-searchCd">
+                <h3 class="cd-search-product-title">
+                  <a class="card-title-searchCd" href="goodsDetail.do?titleID=123">Title</a>
+                </h3>
+                <h3 class="cd-search-product-title">Various Artists</h3>
+              </div>
+              <img class="card-img" src="https://img.discas.net/example.jpg">
+            </div>
+            """;
+        var parser = new DiscasSearchResultParser();
+
+        var result = parser.Parse(html, PageUri, DiscSourceCategory.New);
+
+        Assert.Single(result.Products);
+        Assert.Equal("Various Artists", result.Products[0].Artist);
+    }
+
+    /// <summary>
+    /// アーティスト表示そのものが欠落した商品を正常データとして扱わないことを確認する
+    /// </summary>
+    [Fact]
+    public void Parse_ProductWithoutArtistDisplay_ThrowsParseException()
+    {
+        const string html = """
+            <div class="cd-product-item">
+              <div class="card-body-searchCd">
+                <h3 class="cd-search-product-title">
+                  <a class="card-title-searchCd" href="goodsDetail.do?titleID=123">Title</a>
+                </h3>
+              </div>
               <img class="card-img" src="https://img.discas.net/example.jpg">
             </div>
             """;
@@ -79,7 +108,7 @@ public sealed class DiscasSearchResultParserTests
         var exception = Assert.Throws<DiscasSearchParseException>(
             () => parser.Parse(html, PageUri, DiscSourceCategory.New));
 
-        Assert.Contains("アーティストリンク", exception.Message);
+        Assert.Contains("アーティスト表示", exception.Message);
     }
 
     /// <summary>
