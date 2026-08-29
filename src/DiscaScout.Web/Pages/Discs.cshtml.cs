@@ -1,79 +1,69 @@
+using System.Text.Json;
 using DiscaScout.Core;
 using DiscaScout.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 
 namespace DiscaScout.Web.Pages;
 
 /// <summary>
-/// 未チェック、Pickup、全件のCD一覧とレビュー状態変更を提供する
+/// 未チェック、Pickup、全件のCD一覧とレビュー操作、検索条件を提供する
 /// </summary>
 public sealed class DiscsModel(DiscaScoutDbContext dbContext) : PageModel
 {
-    /// <summary>表示対象タブ</summary>
+    private static readonly TimeZoneInfo JapanTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Asia/Tokyo");
+
     [BindProperty(SupportsGet = true, Name = "tab")]
     public string Tab { get; set; } = "unchecked";
 
-    /// <summary>タイトル・アーティスト横断検索語</summary>
-    [BindProperty(SupportsGet = true, Name = "q")]
-    public string? Search { get; set; }
+    [BindProperty(SupportsGet = true, Name = "title")]
+    public string? TitleSearch { get; set; }
 
-    /// <summary>レンタル状態フィルター</summary>
+    [BindProperty(SupportsGet = true, Name = "artist")]
+    public string? ArtistSearch { get; set; }
+
+    [BindProperty(SupportsGet = true, Name = "genre")]
+    public string? Genre { get; set; }
+
     [BindProperty(SupportsGet = true, Name = "rental")]
     public string Rental { get; set; } = "all";
 
-    /// <summary>並び順</summary>
     [BindProperty(SupportsGet = true, Name = "sort")]
     public string Sort { get; set; } = "updated";
 
-    /// <summary>1ページの表示件数</summary>
     [BindProperty(SupportsGet = true, Name = "size")]
     public int PageSize { get; set; } = 50;
 
-    /// <summary>1から始まるページ番号</summary>
     [BindProperty(SupportsGet = true, Name = "p")]
     public int PageNumber { get; set; } = 1;
 
-    /// <summary>現在ページのCD</summary>
     public IReadOnlyList<Disc> Items { get; private set; } = [];
-
-    /// <summary>未チェック件数</summary>
+    public IReadOnlyList<string> GenreOptions { get; private set; } = [];
     public int UncheckedCount { get; private set; }
-
-    /// <summary>現在Watchに一致するPickup件数</summary>
     public int PickupCount { get; private set; }
-
-    /// <summary>絞り込み後の総件数</summary>
     public int TotalCount { get; private set; }
-
-    /// <summary>総ページ数</summary>
     public int TotalPages => Math.Max(1, (int)Math.Ceiling(TotalCount / (double)PageSize));
 
-    /// <summary>処理結果メッセージ</summary>
     [TempData]
     public string? StatusMessage { get; set; }
 
-    /// <summary>
-    /// 現在条件のCD一覧を読み込む
-    /// </summary>
+    [TempData]
+    public string? UndoPayload { get; set; }
+
     public async Task OnGetAsync(CancellationToken cancellationToken)
     {
         NormalizeInputs();
-
-        UncheckedCount = await dbContext.Discs.CountAsync(
-            x => x.NeedsReview && !x.IsRented && !x.IsArchived,
-            cancellationToken);
-        PickupCount = await dbContext.Discs.CountAsync(
-            x => x.ArtistMatches.Any(m => m.IsCurrentMatch && !m.ArtistSetting.IsArchived && m.ArtistSetting.IsWatchEnabled),
-            cancellationToken);
+        UncheckedCount = await dbContext.Discs.CountAsync(x => x.NeedsReview && !x.IsRented && !x.IsArchived, cancellationToken);
+        PickupCount = await dbContext.Discs.CountAsync(x => x.ArtistMatches.Any(m => m.IsCurrentMatch && !m.ArtistSetting.IsArchived && m.ArtistSetting.IsWatchEnabled), cancellationToken);
+        GenreOptions = await LoadGenreOptionsAsync(cancellationToken);
 
         var query = dbContext.Discs
             .AsNoTracking()
             .Include(x => x.ReviewReasons)
             .Include(x => x.Sources)
-            .Include(x => x.ArtistMatches)
-                .ThenInclude(x => x.ArtistSetting)
+            .Include(x => x.ArtistMatches).ThenInclude(x => x.ArtistSetting)
             .AsQueryable();
 
         query = ApplyTab(query);
@@ -82,26 +72,14 @@ public sealed class DiscsModel(DiscaScoutDbContext dbContext) : PageModel
         query = ApplySort(query);
 
         TotalCount = await query.CountAsync(cancellationToken);
-        if (PageNumber > TotalPages)
-        {
-            PageNumber = TotalPages;
-        }
-
-        Items = await query
-            .Skip((PageNumber - 1) * PageSize)
-            .Take(PageSize)
-            .ToListAsync(cancellationToken);
+        PageNumber = Math.Min(PageNumber, TotalPages);
+        Items = await query.Skip((PageNumber - 1) * PageSize).Take(PageSize).ToListAsync(cancellationToken);
     }
 
-    /// <summary>
-    /// CDを確認済みにして現在のレビュー理由を消去する
-    /// </summary>
     public async Task<IActionResult> OnPostReviewedAsync(long id, string? returnUrl, CancellationToken cancellationToken)
     {
-        var disc = await dbContext.Discs
-            .Include(x => x.ReviewReasons)
-            .SingleAsync(x => x.Id == id, cancellationToken);
-
+        var disc = await dbContext.Discs.Include(x => x.ReviewReasons).SingleAsync(x => x.Id == id, cancellationToken);
+        SetUndoPayload(disc);
         disc.NeedsReview = false;
         disc.LastReviewedAt = TimeProvider.System.GetUtcNow().UtcDateTime;
         dbContext.DiscReviewReasons.RemoveRange(disc.ReviewReasons);
@@ -110,15 +88,10 @@ public sealed class DiscsModel(DiscaScoutDbContext dbContext) : PageModel
         return RedirectBack(returnUrl);
     }
 
-    /// <summary>
-    /// CDを借りた状態にし、Inboxから除外する
-    /// </summary>
     public async Task<IActionResult> OnPostRentedAsync(long id, string? returnUrl, CancellationToken cancellationToken)
     {
-        var disc = await dbContext.Discs
-            .Include(x => x.ReviewReasons)
-            .SingleAsync(x => x.Id == id, cancellationToken);
-
+        var disc = await dbContext.Discs.Include(x => x.ReviewReasons).SingleAsync(x => x.Id == id, cancellationToken);
+        SetUndoPayload(disc);
         disc.IsRented = true;
         disc.NeedsReview = false;
         disc.LastReviewedAt = TimeProvider.System.GetUtcNow().UtcDateTime;
@@ -128,114 +101,190 @@ public sealed class DiscsModel(DiscaScoutDbContext dbContext) : PageModel
         return RedirectBack(returnUrl);
     }
 
-    /// <summary>
-    /// 確認済みCDを手動で未チェックへ戻す
-    /// </summary>
     public async Task<IActionResult> OnPostReopenAsync(long id, string? returnUrl, CancellationToken cancellationToken)
     {
         var disc = await dbContext.Discs.SingleAsync(x => x.Id == id, cancellationToken);
         if (!disc.IsRented)
         {
-            // 手動での再確認要求は自動差分理由とは別なのでReviewReasonは追加しない。
-            // NeedsReviewだけを戻すことで、次の自動変化理由を履歴と混同しないようにする。
             disc.NeedsReview = true;
             await dbContext.SaveChangesAsync(cancellationToken);
         }
-
         return RedirectBack(returnUrl);
     }
 
     /// <summary>
-    /// 現在Watchに一致している有効な設定名を表示用に返す
+    /// 現在ページに表示されている未チェックCDをまとめて確認済みにする
     /// </summary>
+    public async Task<IActionResult> OnPostReviewPageAsync(List<long> ids, string? returnUrl, CancellationToken cancellationToken)
+    {
+        var discs = await dbContext.Discs.Include(x => x.ReviewReasons)
+            .Where(x => ids.Contains(x.Id) && x.NeedsReview && !x.IsRented)
+            .ToListAsync(cancellationToken);
+        var now = TimeProvider.System.GetUtcNow().UtcDateTime;
+        foreach (var disc in discs)
+        {
+            disc.NeedsReview = false;
+            disc.LastReviewedAt = now;
+            dbContext.DiscReviewReasons.RemoveRange(disc.ReviewReasons);
+        }
+        await dbContext.SaveChangesAsync(cancellationToken);
+        UndoPayload = null;
+        StatusMessage = $"現在ページの {discs.Count} 件を確認済みにしました";
+        return RedirectBack(returnUrl);
+    }
+
+    /// <summary>
+    /// 直前の個別レビュー操作またはレンタル操作を元の状態へ戻す
+    /// </summary>
+    public async Task<IActionResult> OnPostUndoAsync(string undoPayload, string? returnUrl, CancellationToken cancellationToken)
+    {
+        var state = JsonSerializer.Deserialize<ReviewUndoState>(undoPayload);
+        if (state is null)
+        {
+            return RedirectBack(returnUrl);
+        }
+
+        var disc = await dbContext.Discs.Include(x => x.ReviewReasons).SingleAsync(x => x.Id == state.DiscId, cancellationToken);
+        dbContext.DiscReviewReasons.RemoveRange(disc.ReviewReasons);
+        disc.IsRented = state.IsRented;
+        disc.NeedsReview = state.NeedsReview;
+        disc.LastReviewedAt = state.LastReviewedAt;
+        foreach (var reason in state.Reasons)
+        {
+            disc.ReviewReasons.Add(new DiscReviewReason { Reason = reason.Reason, CreatedAt = reason.CreatedAt });
+        }
+        await dbContext.SaveChangesAsync(cancellationToken);
+        UndoPayload = null;
+        StatusMessage = $"「{disc.Title}」の直前の操作を元に戻しました";
+        return RedirectBack(returnUrl);
+    }
+
     public static string GetPickupArtists(Disc disc) => string.Join(", ", disc.ArtistMatches
         .Where(x => x.IsCurrentMatch && !x.ArtistSetting.IsArchived && x.ArtistSetting.IsWatchEnabled)
-        .Select(x => x.ArtistSetting.Artist)
-        .Distinct(StringComparer.Ordinal));
+        .Select(x => x.ArtistSetting.Artist).Distinct(StringComparer.Ordinal));
 
-    private IQueryable<Disc> ApplyTab(IQueryable<Disc> query)
+    public static string FormatReviewReason(DiscReviewReasonType reason) => reason switch
     {
-        return Tab switch
-        {
-            "pickup" => query.Where(x => x.ArtistMatches.Any(
-                m => m.IsCurrentMatch && !m.ArtistSetting.IsArchived && m.ArtistSetting.IsWatchEnabled)),
-            "all" when !string.IsNullOrWhiteSpace(Search) => query,
-            "all" => query.Where(x => !x.IsArchived),
-            _ => query.Where(x => x.NeedsReview && !x.IsRented && !x.IsArchived)
-        };
+        DiscReviewReasonType.New => "新規",
+        DiscReviewReasonType.TitleChanged => "タイトル変更",
+        DiscReviewReasonType.ArtistMatched => "Artist Watch一致",
+        DiscReviewReasonType.Reappeared => "再出現",
+        _ => reason.ToString()
+    };
+
+    public string? GetRentalCategoryLabel(DateOnly? rentalStartDate)
+    {
+        if (rentalStartDate is null) return null;
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(TimeProvider.System.GetUtcNow(), JapanTimeZone).DateTime);
+        var elapsedDays = today.DayNumber - rentalStartDate.Value.DayNumber;
+        if (elapsedDays < 0) return "近日リリース";
+        if (elapsedDays <= 90) return "新作";
+        if (elapsedDays <= 180) return "準新作";
+        return "旧作";
     }
+
+    public string GetTabUrl(string tab) => BuildListUrl(tab, TitleSearch, ArtistSearch, Genre, Rental, Sort, PageSize, 1);
+    public string GetArtistUrl(string artist) => BuildListUrl(Tab, TitleSearch, artist, Genre, Rental, Sort, PageSize, 1);
+    public string GetGenreUrl(string genre) => BuildListUrl(Tab, TitleSearch, ArtistSearch, genre, Rental, Sort, PageSize, 1);
+    public string GetPageUrl(int page) => BuildListUrl(Tab, TitleSearch, ArtistSearch, Genre, Rental, Sort, PageSize, page);
+
+    private IQueryable<Disc> ApplyTab(IQueryable<Disc> query) => Tab switch
+    {
+        "pickup" => query.Where(x => x.ArtistMatches.Any(m => m.IsCurrentMatch && !m.ArtistSetting.IsArchived && m.ArtistSetting.IsWatchEnabled)),
+        "all" when HasSearchFilters() => query,
+        "all" => query.Where(x => !x.IsArchived),
+        _ => query.Where(x => x.NeedsReview && !x.IsRented && !x.IsArchived)
+    };
 
     private IQueryable<Disc> ApplySearch(IQueryable<Disc> query)
     {
-        if (string.IsNullOrWhiteSpace(Search))
-        {
-            return query;
-        }
-
-        // 空白区切りの各語についてTitleまたはArtistのどちらかに含まれることを要求し、
-        // フィールドをまたいだAND検索を実現する。
-        foreach (var term in Search.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        foreach (var term in SplitTerms(TitleSearch))
         {
             var normalized = DiscTextNormalizer.Normalize(term);
-            query = query.Where(x => x.NormalizedTitle.Contains(normalized) || x.NormalizedArtist.Contains(normalized));
+            query = query.Where(x => x.NormalizedTitle.Contains(normalized));
         }
-
+        foreach (var term in SplitTerms(ArtistSearch))
+        {
+            var normalized = DiscTextNormalizer.Normalize(term);
+            query = query.Where(x => x.NormalizedArtist.Contains(normalized));
+        }
+        if (!string.IsNullOrWhiteSpace(Genre))
+        {
+            query = query.Where(x => x.GenreLarge == Genre || x.GenreMiddle == Genre || x.GenreSmall == Genre);
+        }
         return query;
     }
 
-    private IQueryable<Disc> ApplyRentalFilter(IQueryable<Disc> query)
+    private IQueryable<Disc> ApplyRentalFilter(IQueryable<Disc> query) => Rental switch
     {
-        return Rental switch
-        {
-            "rented" => query.Where(x => x.IsRented),
-            "unrented" => query.Where(x => !x.IsRented),
-            _ => query
-        };
+        "rented" => query.Where(x => x.IsRented),
+        "unrented" => query.Where(x => !x.IsRented),
+        _ => query
+    };
+
+    private IQueryable<Disc> ApplySort(IQueryable<Disc> query) => Sort switch
+    {
+        // 詳細情報未取得CDでも検索結果順位が自然な順序になるよう、レンタル開始日がない場合だけSourceRankを使う。
+        "rental" => query.OrderByDescending(x => x.RentalStartDate.HasValue)
+            .ThenByDescending(x => x.RentalStartDate)
+            .ThenBy(x => x.Sources.Where(s => s.IsActive).Select(s => (int?)s.SourceRank).Min() ?? int.MaxValue)
+            .ThenByDescending(x => x.LastUpdatedAt),
+        "title" => query.OrderBy(x => x.NormalizedTitle).ThenBy(x => x.Id),
+        "artist" => query.OrderBy(x => x.NormalizedArtist).ThenBy(x => x.NormalizedTitle),
+        _ => query.OrderByDescending(x => x.LastUpdatedAt).ThenByDescending(x => x.Id)
+    };
+
+    private async Task<IReadOnlyList<string>> LoadGenreOptionsAsync(CancellationToken cancellationToken)
+    {
+        var large = await dbContext.Discs.Select(x => x.GenreLarge).Distinct().ToListAsync(cancellationToken);
+        var middle = await dbContext.Discs.Where(x => x.GenreMiddle != null).Select(x => x.GenreMiddle!).Distinct().ToListAsync(cancellationToken);
+        var small = await dbContext.Discs.Where(x => x.GenreSmall != null).Select(x => x.GenreSmall!).Distinct().ToListAsync(cancellationToken);
+        return large.Concat(middle).Concat(small).Distinct(StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal).ToArray();
     }
 
-    private IQueryable<Disc> ApplySort(IQueryable<Disc> query)
+    private void SetUndoPayload(Disc disc)
     {
-        return Sort switch
-        {
-            "rental" => query.OrderByDescending(x => x.RentalStartDate).ThenByDescending(x => x.LastUpdatedAt),
-            "title" => query.OrderBy(x => x.NormalizedTitle).ThenBy(x => x.Id),
-            "artist" => query.OrderBy(x => x.NormalizedArtist).ThenBy(x => x.NormalizedTitle),
-            _ => query.OrderByDescending(x => x.LastUpdatedAt).ThenByDescending(x => x.Id)
-        };
+        UndoPayload = JsonSerializer.Serialize(new ReviewUndoState(
+            disc.Id,
+            disc.IsRented,
+            disc.NeedsReview,
+            disc.LastReviewedAt,
+            disc.ReviewReasons.Select(x => new ReviewReasonUndoState(x.Reason, x.CreatedAt)).ToArray()));
     }
+
+    private bool HasSearchFilters() => !string.IsNullOrWhiteSpace(TitleSearch) || !string.IsNullOrWhiteSpace(ArtistSearch) || !string.IsNullOrWhiteSpace(Genre);
+    private static IEnumerable<string> SplitTerms(string? value) => string.IsNullOrWhiteSpace(value) ? [] : value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     private void NormalizeInputs()
     {
-        if (Tab is not ("unchecked" or "pickup" or "all"))
-        {
-            Tab = "unchecked";
-        }
-
-        if (Rental is not ("all" or "rented" or "unrented"))
-        {
-            Rental = "all";
-        }
-
-        if (Sort is not ("updated" or "rental" or "title" or "artist"))
-        {
-            Sort = "updated";
-        }
-
-        if (PageSize is not (50 or 100 or 200))
-        {
-            PageSize = 50;
-        }
-
+        if (Tab is not ("unchecked" or "pickup" or "all")) Tab = "unchecked";
+        if (Rental is not ("all" or "rented" or "unrented")) Rental = "all";
+        if (Sort is not ("updated" or "rental" or "title" or "artist")) Sort = "updated";
+        if (PageSize is not (50 or 100 or 200)) PageSize = 50;
         PageNumber = Math.Max(1, PageNumber);
+        TitleSearch = string.IsNullOrWhiteSpace(TitleSearch) ? null : TitleSearch.Trim();
+        ArtistSearch = string.IsNullOrWhiteSpace(ArtistSearch) ? null : ArtistSearch.Trim();
+        Genre = string.IsNullOrWhiteSpace(Genre) ? null : Genre.Trim();
     }
 
-    private IActionResult RedirectBack(string? returnUrl)
+    private IActionResult RedirectBack(string? returnUrl) => !string.IsNullOrWhiteSpace(returnUrl) && Url.IsLocalUrl(returnUrl) ? LocalRedirect(returnUrl) : RedirectToPage();
+
+    private static string BuildListUrl(string tab, string? title, string? artist, string? genre, string rental, string sort, int size, int page)
     {
-        if (!string.IsNullOrWhiteSpace(returnUrl) && Url.IsLocalUrl(returnUrl))
+        var values = new Dictionary<string, string>
         {
-            return LocalRedirect(returnUrl);
-        }
-
-        return RedirectToPage();
+            ["tab"] = tab,
+            ["rental"] = rental,
+            ["sort"] = sort,
+            ["size"] = size.ToString()
+        };
+        if (!string.IsNullOrWhiteSpace(title)) values["title"] = title;
+        if (!string.IsNullOrWhiteSpace(artist)) values["artist"] = artist;
+        if (!string.IsNullOrWhiteSpace(genre)) values["genre"] = genre;
+        if (page > 1) values["p"] = page.ToString();
+        return QueryHelpers.AddQueryString("/discs", values);
     }
+
+    private sealed record ReviewUndoState(long DiscId, bool IsRented, bool NeedsReview, DateTime? LastReviewedAt, IReadOnlyList<ReviewReasonUndoState> Reasons);
+    private sealed record ReviewReasonUndoState(DiscReviewReasonType Reason, DateTime CreatedAt);
 }
