@@ -19,11 +19,11 @@ internal static class ArtistCatalogModelBuilder
         {
             b.Property<long>("Id").ValueGeneratedOnAdd().HasColumnType("INTEGER").HasAnnotation("Sqlite:Autoincrement", true);
             b.Property<long>("ArtistSettingId").HasColumnType("INTEGER");
-            b.Property<DateTimeOffset?>("DeactivatedAt").HasColumnType("TEXT");
+            b.Property<DateTime?>("DeactivatedAt").HasColumnType("TEXT");
             b.Property<long>("DiscId").HasColumnType("INTEGER");
-            b.Property<DateTimeOffset>("FirstSeenAt").HasColumnType("TEXT");
+            b.Property<DateTime>("FirstSeenAt").HasColumnType("TEXT");
             b.Property<bool>("IsActive").HasColumnType("INTEGER");
-            b.Property<DateTimeOffset>("LastSeenAt").HasColumnType("TEXT");
+            b.Property<DateTime>("LastSeenAt").HasColumnType("TEXT");
             b.HasKey("Id");
             b.HasIndex("ArtistSettingId", "IsActive");
             b.HasIndex("DiscId", "ArtistSettingId").IsUnique();
