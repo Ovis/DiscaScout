@@ -13,6 +13,7 @@ if (!string.IsNullOrEmpty(databaseDirectory))
     Directory.CreateDirectory(databaseDirectory);
 }
 
+builder.Services.AddRazorPages();
 builder.Services.AddDbContext<DiscaScoutDbContext>(options =>
     options.UseSqlite($"Data Source={databasePath}"));
 builder.Services.AddHttpClient<DiscasPageFetcher>();
@@ -34,11 +35,13 @@ await using (var scope = app.Services.CreateAsyncScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<DiscaScoutDbContext>();
 
-    // まだ初回リリース前でMigration運用を開始していないため、開発中のホスト起動ではDBを自動作成する。
-    // 永続DBを正式運用する前にMigrationへ切り替え、既存DBを破棄せずスキーマ更新できる状態にする。
-    await dbContext.Database.EnsureCreatedAsync();
+    // 永続DBを破棄せず今後のスキーマ変更を適用できるよう、起動時はMigrationを前進適用する。
+    // 単一インスタンス運用を前提としているため、同じSQLite DBへ複数ホストが同時Migrationする構成は採らない。
+    await dbContext.Database.MigrateAsync();
 }
 
+app.MapGet("/", () => Results.Redirect("/operations"));
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+app.MapRazorPages();
 
 await app.RunAsync();
