@@ -17,4 +17,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/DiscaScout.Scraping/DiscaScout.Scraping.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <Content Include="Fixtures/**/*.html" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>
