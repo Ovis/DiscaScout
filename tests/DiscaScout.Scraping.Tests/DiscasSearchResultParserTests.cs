@@ -88,10 +88,35 @@ public sealed class DiscasSearchResultParserTests
     }
 
     /// <summary>
-    /// DISCAS側にアーティスト表示がない商品は欠損値として保持できることを確認する
+    /// 通常リンクを生成できないアーティストが専用見出しに表示されるケースを解析できることを確認する
     /// </summary>
     [Fact]
-    public void Parse_ProductWithoutArtistDisplay_ReturnsNullArtist()
+    public void Parse_UnavailableArtistMarkup_UsesFallbackHeading()
+    {
+        const string html = """
+            <div class="cd-product-item">
+              <div class="card-body-searchCd">
+                <h3 class="cd-search-product-title">
+                  <a class="card-title-searchCd" href="goodsDetail.do?titleID=7635390756">【MAXI】Which Way is Love?(マキシシングル)</a>
+                </h3>
+                <h3 class="cd-search-artist-not-available">トレンドジ―</h3>
+              </div>
+              <img class="card-img" src="https://img.discas.net/example.jpg">
+            </div>
+            """;
+        var parser = new DiscasSearchResultParser();
+
+        var result = parser.Parse(html, PageUri, DiscSourceCategory.New);
+
+        Assert.Single(result.Products);
+        Assert.Equal("トレンドジ―", result.Products[0].Artist);
+    }
+
+    /// <summary>
+    /// 通常・フォールバックのどちらにもアーティスト表示がない商品を正常データとして扱わないことを確認する
+    /// </summary>
+    [Fact]
+    public void Parse_ProductWithoutArtistDisplay_ThrowsParseException()
     {
         const string html = """
             <div class="cd-product-item">
@@ -105,10 +130,10 @@ public sealed class DiscasSearchResultParserTests
             """;
         var parser = new DiscasSearchResultParser();
 
-        var result = parser.Parse(html, PageUri, DiscSourceCategory.New);
+        var exception = Assert.Throws<DiscasSearchParseException>(
+            () => parser.Parse(html, PageUri, DiscSourceCategory.New));
 
-        Assert.Single(result.Products);
-        Assert.Null(result.Products[0].Artist);
+        Assert.Contains("アーティスト表示", exception.Message);
     }
 
     /// <summary>
