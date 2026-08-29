@@ -28,6 +28,7 @@ builder.Services.AddScoped<ArtistWatchService>(); builder.Services.AddScoped<Art
 builder.Services.AddScoped(sp => new DiscImageCacheService(sp.GetRequiredService<DiscaScoutDbContext>(), sp.GetRequiredService<IHttpClientFactory>().CreateClient("disc-image-cache"), Path.GetFullPath(imageCachePath)));
 builder.Services.AddScoped<ArtistCatalogCollectionService>(); builder.Services.AddScoped<DiscDetailMetadataService>();
 builder.Services.AddScoped<ScrapeOperationsStore>(); builder.Services.AddScoped<IScrapeOperationsStore>(sp => sp.GetRequiredService<ScrapeOperationsStore>()); builder.Services.AddScoped<IScrapeOperationsQueryStore>(sp => sp.GetRequiredService<ScrapeOperationsStore>());
+builder.Services.AddScoped<ScrapeGuardStore>(); builder.Services.AddScoped<IScrapeGuardStore>(sp => sp.GetRequiredService<ScrapeGuardStore>());
 builder.Services.AddScoped<IScrapeScheduleStore, ScrapeScheduleStore>(); builder.Services.AddScoped<ManualWorkStore>(); builder.Services.AddScoped<DiscasScrapeService>(); builder.Services.AddScoped<ScrapeRunCoordinator>();
 builder.Services.AddSingleton<ScrapeExecutionGate>(); builder.Services.AddSingleton<ManualWorkSignal>(); builder.Services.AddSingleton<DiscDetailFetchSignal>();
 builder.Services.AddHostedService<ScrapeBackgroundService>(); builder.Services.AddHostedService<DiscImageCacheBackgroundService>(); builder.Services.AddHostedService<DiscDetailMetadataBackgroundService>();
