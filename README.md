@@ -8,6 +8,7 @@
 
 - [architecture.md](architecture.md) — システム全体の目的、アーキテクチャ、データモデル、状態遷移、バックグラウンド処理、UI 方針
 - [discas-scraping.md](discas-scraping.md) — TSUTAYA DISCAS の検索ページに関する実地調査結果とスクレイピング仕様
+- [scraping-policy.md](scraping-policy.md) — DISCASへのアクセス負荷制御、ジャンル取得、追加リクエスト抑制に関する必須方針
 
 ## Documentation policy
 
