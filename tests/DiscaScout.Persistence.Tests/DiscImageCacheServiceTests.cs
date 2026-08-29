@@ -117,7 +117,7 @@ public sealed class DiscImageCacheServiceTests
 
     private static async Task<Disc> AddDiscAsync(DiscaScoutDbContext context, string discasId, string imageUrl)
     {
-        var now = DateTimeOffset.UtcNow;
+        var now = DateTime.UtcNow;
         var disc = new Disc
         {
             DiscasId = discasId,
