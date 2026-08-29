@@ -24,26 +24,15 @@ if (crawlMode)
 {
     var crawler = new DiscasCategoryCrawler(fetcher, parser);
     var snapshot = await crawler.CrawlAsync(category, SaveFetchedPageAsync);
-    var missingArtistProducts = snapshot.Products.Where(product => product.Artist is null).ToArray();
 
     Console.WriteLine($"Category: {snapshot.Category}");
     Console.WriteLine($"Reported total: {snapshot.TotalCount:N0}");
     Console.WriteLine($"Pages: {snapshot.PageCount:N0}");
     Console.WriteLine($"Parsed products: {snapshot.Products.Count:N0}");
-    Console.WriteLine($"Products without artist: {missingArtistProducts.Length:N0}");
 
     foreach (var product in snapshot.Products.Take(10))
     {
-        Console.WriteLine($"#{product.SourceRank} [{product.DiscasId}] {product.Title} / {product.Artist ?? "(none)"}");
-    }
-
-    if (missingArtistProducts.Length > 0)
-    {
-        Console.WriteLine("Products without artist metadata:");
-        foreach (var product in missingArtistProducts.Take(10))
-        {
-            Console.WriteLine($"  #{product.SourceRank} [{product.DiscasId}] {product.Title}");
-        }
+        Console.WriteLine($"#{product.SourceRank} [{product.DiscasId}] {product.Title} / {product.Artist}");
     }
 
     return 0;
@@ -76,11 +65,10 @@ Console.WriteLine($"Parsed products: {page.Products.Count:N0}");
 Console.WriteLine($"Reported total: {page.TotalCount?.ToString("N0") ?? "(unknown)"}");
 Console.WriteLine($"Hidden title IDs: {page.HiddenTitleIds.Count:N0}");
 Console.WriteLine($"Product IDs match hidden IDs: {hiddenIdsMatch}");
-Console.WriteLine($"Products without artist: {page.Products.Count(product => product.Artist is null):N0}");
 
 foreach (var product in page.Products.Take(10))
 {
-    Console.WriteLine($"#{product.SourceRank} [{product.DiscasId}] {product.Title} / {product.Artist ?? "(none)"}");
+    Console.WriteLine($"#{product.SourceRank} [{product.DiscasId}] {product.Title} / {product.Artist}");
     Console.WriteLine($"  URL: {product.ProductUrl}");
     Console.WriteLine($"  Image: {product.ImageUrl ?? "(none)"}");
 }
