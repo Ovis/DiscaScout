@@ -85,16 +85,16 @@ public sealed class DiscasCategoryCrawlerTests
     {
         var productHtml = string.Join(
             Environment.NewLine,
-            products.Select(x => $"""
+            products.Select(x => $$"""
                 <div class="cd-product-item">
                   <div class="card-body-searchCd">
-                    <h3 class="cd-search-product-title"><a class="card-title-searchCd" href="goodsDetail.do?titleID={x.Id}">{x.Title}</a></h3>
-                    <h3 class="cd-search-product-title"><a href="artistsearchHmo.do?a=1">アーティスト{x.Id}</a></h3>
+                    <h3 class="cd-search-product-title"><a class="card-title-searchCd" href="goodsDetail.do?titleID={{x.Id}}">{{x.Title}}</a></h3>
+                    <h3 class="cd-search-product-title"><a href="artistsearchHmo.do?a=1">アーティスト{{x.Id}}</a></h3>
                   </div>
-                  <img class="card-img" src="https://img.discas.net/img/jacket/{x.Id}.jpg">
+                  <img class="card-img" src="https://img.discas.net/img/jacket/{{x.Id}}.jpg">
                 </div>
                 <script>
-                  var itemTopGATag{x.Id} = {{event:'teigaku_search_cd', category:'CD', genre_large:'J-POP', genre_mid:'J-POP', genre_min:'null', titleid:'{x.Id}'}};
+                  var itemTopGATag{{x.Id}} = {event:'teigaku_search_cd', category:'CD', genre_large:'J-POP', genre_mid:'J-POP', genre_min:'null', titleid:'{{x.Id}}'};
                 </script>
                 """));
 
