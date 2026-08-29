@@ -17,11 +17,13 @@ using var httpClient = new HttpClient(handler)
 
 var fetcher = new DiscasPageFetcher(httpClient);
 var parser = new DiscasSearchResultParser();
+var outputDirectory = Path.Combine(Environment.CurrentDirectory, "artifacts", "probe");
+Directory.CreateDirectory(outputDirectory);
 
 if (crawlMode)
 {
     var crawler = new DiscasCategoryCrawler(fetcher, parser);
-    var snapshot = await crawler.CrawlAsync(category);
+    var snapshot = await crawler.CrawlAsync(category, SaveFetchedPageAsync);
     var missingArtistProducts = snapshot.Products.Where(product => product.Artist is null).ToArray();
 
     Console.WriteLine($"Category: {snapshot.Category}");
@@ -55,8 +57,6 @@ Console.WriteLine($"Final URI: {result.FinalUri}");
 Console.WriteLine($"Charset: {result.Charset ?? "(not specified)"}");
 Console.WriteLine($"HTML length: {result.Html.Length:N0}");
 
-var outputDirectory = Path.Combine(Environment.CurrentDirectory, "artifacts", "probe");
-Directory.CreateDirectory(outputDirectory);
 var outputPath = Path.Combine(outputDirectory, "search-result.html");
 await File.WriteAllTextAsync(outputPath, result.Html);
 Console.WriteLine($"Saved HTML: {outputPath}");
@@ -96,3 +96,16 @@ if (page.Products.Count == 0 || !hiddenIdsMatch)
 }
 
 return 0;
+
+async ValueTask SaveFetchedPageAsync(DiscasFetchedPage fetchedPage, CancellationToken cancellationToken)
+{
+    var categoryName = fetchedPage.Category == DiscSourceCategory.New ? "new" : "upcoming";
+    var fileName = $"{categoryName}-page-{fetchedPage.PageNumber:D3}.html";
+    var path = Path.Combine(outputDirectory, fileName);
+
+    // 解析より先にHTMLを保存することで、DOM変更や未知の商品形式でParseが失敗しても
+    // 実際に返されたページを後からそのまま調査できるようにする。
+    await File.WriteAllTextAsync(path, fetchedPage.Html, cancellationToken);
+    Console.WriteLine($"Fetched page {fetchedPage.PageNumber}: {fetchedPage.Uri}");
+    Console.WriteLine($"Saved HTML: {path}");
+}
