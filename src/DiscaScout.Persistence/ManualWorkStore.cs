@@ -11,11 +11,11 @@ public sealed class ManualWorkStore(DiscaScoutDbContext dbContext)
     /// <summary>
     /// 通常の手動取得を重複しないようPendingで登録する
     /// </summary>
-    /// <returns>新しい要求を登録した場合はtrue、同種処理が既に保留・実行中ならfalse</returns>
+    /// <returns>新しい要求を登録した場合はtrue、通常取得系の処理が既に保留・実行中ならfalse</returns>
     public async Task<bool> TryEnqueueFullScrapeAsync(DateTime requestedAt, CancellationToken cancellationToken = default)
     {
         var exists = await dbContext.ManualWorkItems.AnyAsync(
-            x => x.Type == ManualWorkType.FullScrape
+            x => (x.Type == ManualWorkType.FullScrape || x.Type == ManualWorkType.CategoryScrape)
                 && (x.Status == ManualWorkStatus.Pending || x.Status == ManualWorkStatus.Running),
             cancellationToken);
         if (exists)
@@ -27,6 +27,39 @@ public sealed class ManualWorkStore(DiscaScoutDbContext dbContext)
         {
             Type = ManualWorkType.FullScrape,
             Status = ManualWorkStatus.Pending,
+            RequestedAt = requestedAt
+        });
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    /// <summary>
+    /// 指定カテゴリだけの通常取得を重複しないようPendingで登録する
+    /// </summary>
+    /// <remarks>
+    /// 急減許可後の確認取得では無関係なカテゴリへ追加アクセスしないため、FullScrapeとは分けて登録する。
+    /// </remarks>
+    /// <returns>新しい要求を登録した場合はtrue、競合する通常取得系処理が既にある場合はfalse</returns>
+    public async Task<bool> TryEnqueueCategoryScrapeAsync(
+        ScrapeCategory category,
+        DateTime requestedAt,
+        CancellationToken cancellationToken = default)
+    {
+        var exists = await dbContext.ManualWorkItems.AnyAsync(
+            x => (x.Type == ManualWorkType.FullScrape
+                    || (x.Type == ManualWorkType.CategoryScrape && x.Category == category))
+                && (x.Status == ManualWorkStatus.Pending || x.Status == ManualWorkStatus.Running),
+            cancellationToken);
+        if (exists)
+        {
+            return false;
+        }
+
+        dbContext.ManualWorkItems.Add(new ManualWorkItem
+        {
+            Type = ManualWorkType.CategoryScrape,
+            Status = ManualWorkStatus.Pending,
+            Category = category,
             RequestedAt = requestedAt
         });
         await dbContext.SaveChangesAsync(cancellationToken);
