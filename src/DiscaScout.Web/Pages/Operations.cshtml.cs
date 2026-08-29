@@ -11,7 +11,7 @@ namespace DiscaScout.Web.Pages;
 /// </summary>
 public sealed class OperationsModel(
     IScrapeScheduleStore scheduleStore,
-    IScrapeOperationsStore operationsStore,
+    IScrapeOperationsQueryStore operationsQueryStore,
     ScrapeExecutionGate executionGate,
     ScrapeRunCoordinator coordinator) : PageModel
 {
@@ -80,7 +80,7 @@ public sealed class OperationsModel(
 
         await scheduleStore.UpdateAsync(IsEnabled, DayOfWeek, LocalTime, cancellationToken);
         StatusMessage = IsEnabled
-            ? $"定期取得を {GetDayLabel(DayOfWeek)} {LocalTime:HH\\:mm} に設定しました"
+            ? $"定期取得を {GetDayLabel(DayOfWeek)} {LocalTime:HH:mm} に設定しました"
             : "定期取得を無効にしました";
         return RedirectToPage();
     }
@@ -129,8 +129,8 @@ public sealed class OperationsModel(
 
     private async Task LoadOperationalStateAsync(CancellationToken cancellationToken)
     {
-        RecentRuns = await operationsStore.GetRecentRunsAsync(30, cancellationToken);
-        PendingRetries = await operationsStore.GetPendingRetriesAsync(cancellationToken);
+        RecentRuns = await operationsQueryStore.GetRecentRunsAsync(30, cancellationToken);
+        PendingRetries = await operationsQueryStore.GetPendingRetriesAsync(cancellationToken);
 
         // 入力検証エラーで再表示する場合も最終実行日は設定ストアから取得し直す。
         var settings = await scheduleStore.GetAsync(cancellationToken);
