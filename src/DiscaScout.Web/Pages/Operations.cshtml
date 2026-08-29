@@ -122,6 +122,33 @@
         </section>
 
         <section class="card full">
+            <h2>手動処理履歴</h2>
+            @if (Model.RecentManualWork.Count == 0)
+            {
+                <div class="empty">手動処理履歴はまだありません。</div>
+            }
+            else
+            {
+                <table>
+                    <thead><tr><th>要求（JST）</th><th>種別</th><th>状態</th><th>対象</th><th>完了（JST）</th><th>失敗理由</th></tr></thead>
+                    <tbody>
+                    @foreach (var work in Model.RecentManualWork)
+                    {
+                        <tr>
+                            <td>@OperationsModel.ToJapanTime(work.RequestedAt).ToString("yyyy-MM-dd HH:mm:ss")</td>
+                            <td>@(work.Type == ManualWorkType.FullScrape ? "通常取得" : "Artist全作品")</td>
+                            <td class="@(work.Status == ManualWorkStatus.Completed ? "ok" : work.Status == ManualWorkStatus.Failed ? "ng" : work.Status == ManualWorkStatus.Running ? "running" : "pending")">@work.Status</td>
+                            <td>@(work.ArtistSettingId?.ToString() ?? "-")</td>
+                            <td>@(work.CompletedAt.HasValue ? OperationsModel.ToJapanTime(work.CompletedAt.Value).ToString("yyyy-MM-dd HH:mm:ss") : "-")</td>
+                            <td class="error">@(work.FailureReason ?? "")</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            }
+        </section>
+
+        <section class="card full">
             <h2>保留中のRetry</h2>
             @if (Model.PendingRetries.Count == 0)
             {
