@@ -1,18 +1,20 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
 namespace DiscaScout.Persistence.Migrations;
 
 /// <summary>
-/// 最新のEF Coreモデルを固定し、後続Migrationとの差分基準として使用する
+/// 手動バックグラウンド処理キューMigrationの識別情報とTargetModelを保持する
 /// </summary>
 [DbContext(typeof(DiscaScoutDbContext))]
-public sealed class DiscaScoutDbContextModelSnapshot : ModelSnapshot
+[Migration("20260829210000_AddManualWorkQueue")]
+partial class AddManualWorkQueue
 {
     /// <inheritdoc />
-    protected override void BuildModel(ModelBuilder modelBuilder)
+    protected override void BuildTargetModel(ModelBuilder modelBuilder)
     {
         ManualWorkModelBuilder.Build(modelBuilder);
     }

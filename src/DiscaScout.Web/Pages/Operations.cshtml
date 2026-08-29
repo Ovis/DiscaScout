@@ -27,11 +27,14 @@
         .check { flex-direction: row; align-items: center; gap: 8px; padding-bottom: 8px; }
         button { border: 0; border-radius: 6px; padding: 9px 15px; font-weight: 650; cursor: pointer; background: #273142; color: white; }
         button.primary { background: #165dce; }
+        button:disabled { cursor: default; opacity: .55; }
         table { width: 100%; border-collapse: collapse; font-size: 13px; }
         th, td { padding: 9px 8px; border-bottom: 1px solid #e6e9ed; text-align: left; vertical-align: top; }
         th { color: #5a6470; font-weight: 650; white-space: nowrap; }
         .ok { color: #147a3d; font-weight: 700; }
         .ng { color: #b42318; font-weight: 700; }
+        .running { color: #165dce; font-weight: 700; }
+        .pending { color: #8a5a00; font-weight: 700; }
         .error { color: #b42318; max-width: 360px; }
         .empty { color: #68707c; padding: 12px 0 2px; }
         @@media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
@@ -79,11 +82,70 @@
 
         <section class="card">
             <h2>手動取得</h2>
-            <p class="muted">近日リリースと新作を順番に取得します。実行中は画面の応答まで時間がかかります。</p>
+            <p class="muted">近日リリースと新作を順番に取得します。要求後はバックグラウンドで処理するため、画面を閉じても継続します。</p>
             <form method="post" asp-page-handler="RunNow">
-                <button class="primary" type="submit">今すぐ取得</button>
+                @if (Model.IsFullScrapeActive)
+                {
+                    <button class="primary" type="submit" disabled>取得中 / 待機中</button>
+                }
+                else
+                {
+                    <button class="primary" type="submit">今すぐ取得</button>
+                }
             </form>
-            <p class="muted">定期取得またはRetryが実行中の場合は開始せず、既存処理を優先します。</p>
+            <p class="muted">手動要求・Retry・定期取得は同時実行せず、DISCASへのアクセスを直列化します。</p>
+        </section>
+
+        <section class="card full">
+            <h2>手動処理キュー</h2>
+            @if (Model.ActiveManualWork.Count == 0)
+            {
+                <div class="empty">保留中・実行中の手動処理はありません。</div>
+            }
+            else
+            {
+                <table>
+                    <thead><tr><th>種別</th><th>状態</th><th>要求時刻（JST）</th><th>対象</th></tr></thead>
+                    <tbody>
+                    @foreach (var work in Model.ActiveManualWork)
+                    {
+                        <tr>
+                            <td>@(work.Type == ManualWorkType.FullScrape ? "通常取得" : "Artist全作品")</td>
+                            <td class="@(work.Status == ManualWorkStatus.Running ? "running" : "pending")">@(work.Status == ManualWorkStatus.Running ? "実行中" : "待機中")</td>
+                            <td>@OperationsModel.ToJapanTime(work.RequestedAt).ToString("yyyy-MM-dd HH:mm:ss")</td>
+                            <td>@(work.ArtistSettingId?.ToString() ?? "-")</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            }
+        </section>
+
+        <section class="card full">
+            <h2>手動処理履歴</h2>
+            @if (Model.RecentManualWork.Count == 0)
+            {
+                <div class="empty">手動処理履歴はまだありません。</div>
+            }
+            else
+            {
+                <table>
+                    <thead><tr><th>要求（JST）</th><th>種別</th><th>状態</th><th>対象</th><th>完了（JST）</th><th>失敗理由</th></tr></thead>
+                    <tbody>
+                    @foreach (var work in Model.RecentManualWork)
+                    {
+                        <tr>
+                            <td>@OperationsModel.ToJapanTime(work.RequestedAt).ToString("yyyy-MM-dd HH:mm:ss")</td>
+                            <td>@(work.Type == ManualWorkType.FullScrape ? "通常取得" : "Artist全作品")</td>
+                            <td class="@(work.Status == ManualWorkStatus.Completed ? "ok" : work.Status == ManualWorkStatus.Failed ? "ng" : work.Status == ManualWorkStatus.Running ? "running" : "pending")">@work.Status</td>
+                            <td>@(work.ArtistSettingId?.ToString() ?? "-")</td>
+                            <td>@(work.CompletedAt.HasValue ? OperationsModel.ToJapanTime(work.CompletedAt.Value).ToString("yyyy-MM-dd HH:mm:ss") : "-")</td>
+                            <td class="error">@(work.FailureReason ?? "")</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            }
         </section>
 
         <section class="card full">

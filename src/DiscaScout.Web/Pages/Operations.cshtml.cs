@@ -1,4 +1,3 @@
-using DiscaScout.Application;
 using DiscaScout.Core;
 using DiscaScout.Persistence;
 using Microsoft.AspNetCore.Mvc;
@@ -7,13 +6,13 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 namespace DiscaScout.Web.Pages;
 
 /// <summary>
-/// 定期取得設定、手動実行、実行履歴を管理する運用画面
+/// 定期取得設定、手動実行要求、実行履歴を管理する運用画面
 /// </summary>
 public sealed class OperationsModel(
     IScrapeScheduleStore scheduleStore,
     IScrapeOperationsQueryStore operationsQueryStore,
-    ScrapeExecutionGate executionGate,
-    ScrapeRunCoordinator coordinator) : PageModel
+    ManualWorkStore manualWorkStore,
+    ManualWorkSignal manualWorkSignal) : PageModel
 {
     private static readonly TimeZoneInfo JapanTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Asia/Tokyo");
 
@@ -32,11 +31,20 @@ public sealed class OperationsModel(
     /// <summary>最後に定期実行した日本時間の日付</summary>
     public DateOnly? LastScheduledExecutionDate { get; private set; }
 
-    /// <summary>直近の実行履歴</summary>
+    /// <summary>直近のスクレイピング実行履歴</summary>
     public IReadOnlyList<ScrapeRun> RecentRuns { get; private set; } = [];
 
     /// <summary>現在保留中のRetry</summary>
     public IReadOnlyList<ScrapeRetry> PendingRetries { get; private set; } = [];
+
+    /// <summary>現在保留または実行中の手動処理</summary>
+    public IReadOnlyList<ManualWorkItem> ActiveManualWork { get; private set; } = [];
+
+    /// <summary>直近の手動処理要求履歴</summary>
+    public IReadOnlyList<ManualWorkItem> RecentManualWork { get; private set; } = [];
+
+    /// <summary>通常の手動取得が既に保留または実行中か</summary>
+    public bool IsFullScrapeActive => ActiveManualWork.Any(x => x.Type == ManualWorkType.FullScrape);
 
     /// <summary>処理後に表示する短いメッセージ</summary>
     [TempData]
@@ -86,21 +94,20 @@ public sealed class OperationsModel(
     }
 
     /// <summary>
-    /// UpcomingとNewを手動実行する
+    /// UpcomingとNewの手動取得をBackgroundServiceへ登録する
     /// </summary>
     public async Task<IActionResult> OnPostRunNowAsync(CancellationToken cancellationToken)
     {
-        // 手動実行もBackgroundServiceと同じ排他を利用し、定期実行やRetryと重複して
-        // DISCASへアクセスしないようにする。
-        var result = await executionGate.TryRunAsync(
-            ct => coordinator.ExecuteAsync(ScrapeExecutionType.Manual, ct),
-            cancellationToken);
-
-        StatusMessage = result is null
-            ? "別の取得処理が実行中のため、手動取得は開始しませんでした"
-            : result.IsSuccess
-                ? "手動取得が正常に完了しました"
-                : "手動取得は完了しましたが、失敗したカテゴリがあります。実行履歴を確認してください";
+        var enqueued = await manualWorkStore.TryEnqueueFullScrapeAsync(DateTime.UtcNow, cancellationToken);
+        if (enqueued)
+        {
+            manualWorkSignal.Notify();
+            StatusMessage = "手動取得を受け付けました。バックグラウンドで実行します";
+        }
+        else
+        {
+            StatusMessage = "手動取得は既に保留中または実行中です";
+        }
 
         return RedirectToPage();
     }
@@ -136,6 +143,8 @@ public sealed class OperationsModel(
     {
         RecentRuns = await operationsQueryStore.GetRecentRunsAsync(30, cancellationToken);
         PendingRetries = await operationsQueryStore.GetPendingRetriesAsync(cancellationToken);
+        ActiveManualWork = await manualWorkStore.GetActiveAsync(cancellationToken);
+        RecentManualWork = await manualWorkStore.GetRecentAsync(20, cancellationToken);
 
         // 入力検証エラーで再表示する場合も最終実行日は設定ストアから取得し直す。
         var settings = await scheduleStore.GetAsync(cancellationToken);

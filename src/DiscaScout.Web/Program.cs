@@ -42,9 +42,11 @@ builder.Services.AddScoped<ScrapeOperationsStore>();
 builder.Services.AddScoped<IScrapeOperationsStore>(sp => sp.GetRequiredService<ScrapeOperationsStore>());
 builder.Services.AddScoped<IScrapeOperationsQueryStore>(sp => sp.GetRequiredService<ScrapeOperationsStore>());
 builder.Services.AddScoped<IScrapeScheduleStore, ScrapeScheduleStore>();
+builder.Services.AddScoped<ManualWorkStore>();
 builder.Services.AddScoped<DiscasScrapeService>();
 builder.Services.AddScoped<ScrapeRunCoordinator>();
 builder.Services.AddSingleton<ScrapeExecutionGate>();
+builder.Services.AddSingleton<ManualWorkSignal>();
 builder.Services.AddHostedService<ScrapeBackgroundService>();
 
 var app = builder.Build();
