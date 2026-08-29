@@ -39,6 +39,13 @@ public sealed class DiscDetailModel(
             return NotFound();
         }
 
+        // DISCAS側の作品詳細は段落や改行がほぼなく、そのままでは長文を追いにくい。
+        // 保存値は原文のまま維持し、詳細画面の表示モデルだけ句点ごとに改行して可読性を補う。
+        if (!string.IsNullOrWhiteSpace(disc.Description))
+        {
+            disc.Description = disc.Description.Replace("。", $"。{Environment.NewLine}", StringComparison.Ordinal);
+        }
+
         Disc = disc;
         if (!disc.DetailRefreshCompleted)
         {
