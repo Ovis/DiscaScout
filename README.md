@@ -8,7 +8,7 @@ Development starts from the backend: scraping, parsing, persistence, change dete
 
 The first milestone is a scraper proof of concept. It intentionally does not implement the application UI or database yet.
 
-The probe verifies that a DISCAS CD search page can be fetched with `HttpClient`, saves the raw HTML as a local artifact, parses it with AngleSharp, and reports candidate product links and image URLs. The captured HTML will be used to determine stable selectors before implementing the production search-result parser.
+The current probe verifies that DISCAS CD search pages can be fetched with `HttpClient`, decoded from Windows-31J, parsed with AngleSharp, and converted into structured product data. The parser validates the product IDs against DISCAS's hidden `titleId` list, and the category crawler can retrieve every page before returning a complete snapshot.
 
 ## Requirements
 
@@ -16,17 +16,35 @@ The probe verifies that a DISCAS CD search page can be fetched with `HttpClient`
 
 ## Run the scraper probe
 
+The default probe fetches the first page of the all-genre DISCAS CD new-release search, sorted by newest rental start date.
+
 ```powershell
 dotnet run --project src/DiscaScout.ScraperProbe
 ```
 
-The default URL targets the first page of the DISCAS CD new-release search. A different search URL can be supplied as the first argument:
+To probe the upcoming-release category instead:
 
 ```powershell
-dotnet run --project src/DiscaScout.ScraperProbe -- "https://movie-tsutaya.tsite.jp/netdvd/cd/searchCd.do?..."
+dotnet run --project src/DiscaScout.ScraperProbe -- probe upcoming
 ```
 
 Raw HTML is written under `artifacts/probe/`, which is ignored by Git.
+
+### Crawl an entire category
+
+To fetch and validate every page in a category:
+
+```powershell
+dotnet run --project src/DiscaScout.ScraperProbe -- --crawl new
+```
+
+or:
+
+```powershell
+dotnet run --project src/DiscaScout.ScraperProbe -- --crawl upcoming
+```
+
+The full crawl does not persist anything. It succeeds only when all pages can be fetched and parsed, each page's parsed product IDs match DISCAS's hidden `titleId` list, the total count is consistent across pages, and the final parsed count matches the reported total.
 
 ## Tests
 
@@ -36,8 +54,7 @@ dotnet test DiscaScout.slnx
 
 ## Next steps
 
-1. Run the probe against the current DISCAS search pages.
-2. Inspect the captured HTML for product identity, title, artist, image, rental-start date, total-result count, sort state, and paging structure.
-3. Preserve representative HTML as test fixtures after removing irrelevant or volatile content where appropriate.
-4. Implement a deterministic search-result parser and pagination model.
-5. Only after the scraper contract is established, introduce persistence and change detection.
+1. Verify the all-genre new and upcoming searches against the current live DISCAS pages.
+2. Confirm that complete category crawls pass the page-level and category-level integrity checks.
+3. Introduce the domain model and persistence only after the scraper contract is stable.
+4. Add change detection and source lifecycle behavior on top of complete category snapshots.
