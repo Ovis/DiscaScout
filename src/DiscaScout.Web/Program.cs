@@ -11,7 +11,9 @@ var databaseDirectory = Path.GetDirectoryName(Path.GetFullPath(databasePath));
 if (!string.IsNullOrEmpty(databaseDirectory)) Directory.CreateDirectory(databaseDirectory);
 Directory.CreateDirectory(Path.GetFullPath(imageCachePath));
 
-builder.Services.AddRazorPages();
+// 画面処理はControllerへ集約し、RazorはViewとしてのみ使用する。
+// Razor Pagesとの併存を残すとルーティングとフォーム記法が二重化するため、MVCだけを登録する。
+builder.Services.AddControllersWithViews();
 builder.Services.AddDbContext<DiscaScoutDbContext>(options => options.UseSqlite($"Data Source={databasePath}"));
 builder.Services.AddSingleton<DiscasRequestThrottle>();
 builder.Services.AddHttpClient<DiscasPageFetcher>();
@@ -43,5 +45,5 @@ app.MapGet("/disc-image/{id:long}", async (long id, DiscaScoutDbContext dbContex
     var contentType = Path.GetExtension(imagePath).ToLowerInvariant() switch { ".png" => "image/png", ".webp" => "image/webp", ".gif" => "image/gif", _ => "image/jpeg" };
     return Results.File(imagePath, contentType, enableRangeProcessing: false);
 });
-app.MapRazorPages();
+app.MapControllers();
 await app.RunAsync();
