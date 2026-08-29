@@ -129,6 +129,7 @@ public sealed record CategoryScrapeResult
     public int AddedCount { get; init; }
     public int UpdatedCount { get; init; }
     public int DeactivatedSourceCount { get; init; }
+    public int ArtistWatchNewMatchCount { get; init; }
     public bool CountDropOverrideUsed { get; init; }
     public string? ErrorMessage { get; init; }
 
@@ -154,6 +155,7 @@ public sealed record CategoryScrapeResult
         AddedCount = applyResult.AddedCount,
         UpdatedCount = applyResult.UpdatedCount,
         DeactivatedSourceCount = applyResult.DeactivatedSourceCount,
+        ArtistWatchNewMatchCount = applyResult.ArtistWatchNewMatchCount,
         CountDropOverrideUsed = countDropOverrideUsed
     };
 
