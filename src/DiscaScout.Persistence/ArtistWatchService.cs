@@ -117,7 +117,7 @@ public sealed class ArtistWatchService(DiscaScoutDbContext dbContext, TimeProvid
             .Include(x => x.ArtistMatches)
             .Include(x => x.ReviewReasons)
             .ToListAsync(cancellationToken);
-        var now = clock.GetUtcNow();
+        var now = clock.GetUtcNow().UtcDateTime;
 
         foreach (var disc in discs)
         {
@@ -174,7 +174,7 @@ public sealed class ArtistWatchService(DiscaScoutDbContext dbContext, TimeProvid
     internal static bool ApplyCurrentMatches(
         Disc disc,
         IReadOnlyCollection<ArtistSetting> settings,
-        DateTimeOffset now)
+        DateTime now)
     {
         var changed = false;
 
@@ -222,7 +222,7 @@ public sealed class ArtistWatchService(DiscaScoutDbContext dbContext, TimeProvid
         return changed;
     }
 
-    private static void AddArtistMatchedReason(Disc disc, DateTimeOffset now)
+    private static void AddArtistMatchedReason(Disc disc, DateTime now)
     {
         if (disc.ReviewReasons.All(x => x.Reason != DiscReviewReasonType.ArtistMatched))
         {

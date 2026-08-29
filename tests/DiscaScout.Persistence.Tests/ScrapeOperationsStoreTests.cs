@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 namespace DiscaScout.Persistence.Tests;
 
 /// <summary>
-/// SQLiteでDateTimeOffsetを扱う運用ストアの照会処理を検証する
+/// SQLiteでUTC DateTimeを扱う運用ストアの比較・並び替えを検証する
 /// </summary>
 public sealed class ScrapeOperationsStoreTests
 {
@@ -13,7 +13,7 @@ public sealed class ScrapeOperationsStoreTests
     public async Task GetNextDueRetryAsync_SQLiteで期限到来済みの最古Retryを返す()
     {
         await using var database = await TestDatabase.CreateAsync();
-        var now = new DateTimeOffset(2026, 8, 29, 12, 0, 0, TimeSpan.Zero);
+        var now = new DateTime(2026, 8, 29, 12, 0, 0, DateTimeKind.Utc);
         database.Context.ScrapeRetries.AddRange(
             new ScrapeRetry
             {
@@ -44,7 +44,7 @@ public sealed class ScrapeOperationsStoreTests
     public async Task GetRecentRunsAsync_SQLiteで開始時刻の新しい順に返す()
     {
         await using var database = await TestDatabase.CreateAsync();
-        var now = new DateTimeOffset(2026, 8, 29, 12, 0, 0, TimeSpan.Zero);
+        var now = new DateTime(2026, 8, 29, 12, 0, 0, DateTimeKind.Utc);
         database.Context.ScrapeRuns.AddRange(
             CreateRun(ScrapeCategory.Upcoming, now.AddHours(-2)),
             CreateRun(ScrapeCategory.New, now.AddHours(-1)));
@@ -58,7 +58,7 @@ public sealed class ScrapeOperationsStoreTests
         Assert.Equal(ScrapeCategory.Upcoming, runs[1].Category);
     }
 
-    private static ScrapeRun CreateRun(ScrapeCategory category, DateTimeOffset startedAt)
+    private static ScrapeRun CreateRun(ScrapeCategory category, DateTime startedAt)
     {
         return new ScrapeRun
         {

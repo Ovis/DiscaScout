@@ -30,12 +30,12 @@ public partial class InitialCreate : Migration
                 ImageUrl = table.Column<string>(type: "TEXT", maxLength: 2048, nullable: true),
                 ImagePath = table.Column<string>(type: "TEXT", maxLength: 2048, nullable: true),
                 RentalStartDate = table.Column<DateOnly>(type: "TEXT", nullable: true),
-                FirstSeenAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
-                LastSeenAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
-                LastUpdatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
+                FirstSeenAt = table.Column<DateTime>(type: "TEXT", nullable: false),
+                LastSeenAt = table.Column<DateTime>(type: "TEXT", nullable: false),
+                LastUpdatedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
                 IsArchived = table.Column<bool>(type: "INTEGER", nullable: false),
                 NeedsReview = table.Column<bool>(type: "INTEGER", nullable: false),
-                LastReviewedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true),
+                LastReviewedAt = table.Column<DateTime>(type: "TEXT", nullable: true),
                 IsRented = table.Column<bool>(type: "INTEGER", nullable: false)
             },
             constraints: table => table.PrimaryKey("PK_Discs", x => x.Id));
@@ -48,10 +48,10 @@ public partial class InitialCreate : Migration
                     .Annotation("Sqlite:Autoincrement", true),
                 Category = table.Column<int>(type: "INTEGER", nullable: false),
                 AttemptNumber = table.Column<int>(type: "INTEGER", nullable: false),
-                DueAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
+                DueAt = table.Column<DateTime>(type: "TEXT", nullable: false),
                 Status = table.Column<int>(type: "INTEGER", nullable: false),
-                CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
-                ResolvedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true)
+                CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
+                ResolvedAt = table.Column<DateTime>(type: "TEXT", nullable: true)
             },
             constraints: table => table.PrimaryKey("PK_ScrapeRetries", x => x.Id));
 
@@ -63,8 +63,8 @@ public partial class InitialCreate : Migration
                     .Annotation("Sqlite:Autoincrement", true),
                 ExecutionType = table.Column<int>(type: "INTEGER", nullable: false),
                 Category = table.Column<int>(type: "INTEGER", nullable: false),
-                StartedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
-                CompletedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
+                StartedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
+                CompletedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
                 DurationMilliseconds = table.Column<long>(type: "INTEGER", nullable: false),
                 IsSuccess = table.Column<bool>(type: "INTEGER", nullable: false),
                 FetchedCount = table.Column<int>(type: "INTEGER", nullable: true),
@@ -99,7 +99,7 @@ public partial class InitialCreate : Migration
                 Field = table.Column<string>(type: "TEXT", maxLength: 100, nullable: false),
                 OldValue = table.Column<string>(type: "TEXT", nullable: true),
                 NewValue = table.Column<string>(type: "TEXT", nullable: true),
-                ChangedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
+                ChangedAt = table.Column<DateTime>(type: "TEXT", nullable: false)
             },
             constraints: table =>
             {
@@ -115,7 +115,7 @@ public partial class InitialCreate : Migration
                     .Annotation("Sqlite:Autoincrement", true),
                 DiscId = table.Column<long>(type: "INTEGER", nullable: false),
                 Reason = table.Column<int>(type: "INTEGER", nullable: false),
-                CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
+                CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false)
             },
             constraints: table =>
             {
@@ -134,7 +134,7 @@ public partial class InitialCreate : Migration
                 SourceRank = table.Column<int>(type: "INTEGER", nullable: false),
                 IsActive = table.Column<bool>(type: "INTEGER", nullable: false),
                 MissingCount = table.Column<int>(type: "INTEGER", nullable: false),
-                LastSeenAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
+                LastSeenAt = table.Column<DateTime>(type: "TEXT", nullable: false)
             },
             constraints: table =>
             {

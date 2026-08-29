@@ -29,7 +29,7 @@ public sealed class ScrapeRunCoordinatorTests
         Assert.Equal("取得失敗", failedRun.FailureReason);
         var retry = Assert.Single(operations.Retries.Where(x => x.Status == ScrapeRetryStatus.Pending));
         Assert.Equal(1, retry.AttemptNumber);
-        Assert.Equal(clock.GetUtcNow().AddHours(3), retry.DueAt);
+        Assert.Equal(clock.GetUtcNow().UtcDateTime.AddHours(3), retry.DueAt);
     }
 
     [Fact]
@@ -64,7 +64,7 @@ public sealed class ScrapeRunCoordinatorTests
         Assert.Equal(ScrapeRetryStatus.Completed, firstRetry.Status);
         var next = Assert.Single(operations.Retries.Where(x => x.Status == ScrapeRetryStatus.Pending));
         Assert.Equal(2, next.AttemptNumber);
-        Assert.Equal(clock.GetUtcNow().AddDays(1), next.DueAt);
+        Assert.Equal(clock.GetUtcNow().UtcDateTime.AddDays(1), next.DueAt);
     }
 
     [Fact]
@@ -117,8 +117,8 @@ public sealed class ScrapeRunCoordinatorTests
         Id = id,
         Category = category,
         AttemptNumber = attemptNumber,
-        DueAt = DateTimeOffset.UtcNow,
-        CreatedAt = DateTimeOffset.UtcNow,
+        DueAt = DateTime.UtcNow,
+        CreatedAt = DateTime.UtcNow,
         Status = ScrapeRetryStatus.Pending
     };
 
@@ -180,7 +180,7 @@ public sealed class ScrapeRunCoordinatorTests
             return Task.CompletedTask;
         }
 
-        public Task EnsureRetryAsync(ScrapeCategory category, int attemptNumber, DateTimeOffset dueAt, DateTimeOffset now, CancellationToken cancellationToken = default)
+        public Task EnsureRetryAsync(ScrapeCategory category, int attemptNumber, DateTime dueAt, DateTime now, CancellationToken cancellationToken = default)
         {
             if (Retries.Any(x => x.Category == category && x.Status == ScrapeRetryStatus.Pending))
             {
@@ -199,7 +199,7 @@ public sealed class ScrapeRunCoordinatorTests
             return Task.CompletedTask;
         }
 
-        public Task CancelPendingRetriesAsync(ScrapeCategory category, DateTimeOffset resolvedAt, CancellationToken cancellationToken = default)
+        public Task CancelPendingRetriesAsync(ScrapeCategory category, DateTime resolvedAt, CancellationToken cancellationToken = default)
         {
             foreach (var retry in Retries.Where(x => x.Category == category && x.Status == ScrapeRetryStatus.Pending))
             {
@@ -209,7 +209,7 @@ public sealed class ScrapeRunCoordinatorTests
             return Task.CompletedTask;
         }
 
-        public Task CompleteRetryAsync(long retryId, DateTimeOffset resolvedAt, CancellationToken cancellationToken = default)
+        public Task CompleteRetryAsync(long retryId, DateTime resolvedAt, CancellationToken cancellationToken = default)
         {
             var retry = Retries.Single(x => x.Id == retryId);
             retry.Status = ScrapeRetryStatus.Completed;
@@ -217,7 +217,7 @@ public sealed class ScrapeRunCoordinatorTests
             return Task.CompletedTask;
         }
 
-        public Task<ScrapeRetry?> GetNextDueRetryAsync(DateTimeOffset now, CancellationToken cancellationToken = default)
+        public Task<ScrapeRetry?> GetNextDueRetryAsync(DateTime now, CancellationToken cancellationToken = default)
             => Task.FromResult(Retries.Where(x => x.Status == ScrapeRetryStatus.Pending && x.DueAt <= now).OrderBy(x => x.DueAt).FirstOrDefault());
     }
 

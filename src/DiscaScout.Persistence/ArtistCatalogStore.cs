@@ -48,7 +48,7 @@ public sealed class ArtistCatalogStore(DiscaScoutDbContext dbContext, TimeProvid
             throw new InvalidOperationException("全作品収集が有効なArtistSettingではない");
         }
 
-        var now = clock.GetUtcNow();
+        var now = clock.GetUtcNow().UtcDateTime;
         await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
         var discs = await dbContext.Discs
@@ -135,7 +135,7 @@ public sealed class ArtistCatalogStore(DiscaScoutDbContext dbContext, TimeProvid
             deactivatedCount);
     }
 
-    private static Disc CreateCatalogOnlyDisc(ScrapedDisc scraped, DateTimeOffset now)
+    private static Disc CreateCatalogOnlyDisc(ScrapedDisc scraped, DateTime now)
     {
         return new Disc
         {
@@ -158,7 +158,7 @@ public sealed class ArtistCatalogStore(DiscaScoutDbContext dbContext, TimeProvid
         };
     }
 
-    private static DiscArtistCatalog CreateRelation(ArtistSetting setting, DateTimeOffset now)
+    private static DiscArtistCatalog CreateRelation(ArtistSetting setting, DateTime now)
     {
         return new DiscArtistCatalog
         {
@@ -169,7 +169,7 @@ public sealed class ArtistCatalogStore(DiscaScoutDbContext dbContext, TimeProvid
         };
     }
 
-    private static void ApplyCatalogMetadata(Disc disc, ScrapedDisc scraped, DateTimeOffset now)
+    private static void ApplyCatalogMetadata(Disc disc, ScrapedDisc scraped, DateTime now)
     {
         disc.ProductUrl = scraped.ProductUrl;
         disc.Title = scraped.Title;

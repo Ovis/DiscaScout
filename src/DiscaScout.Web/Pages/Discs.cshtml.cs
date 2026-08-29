@@ -103,7 +103,7 @@ public sealed class DiscsModel(DiscaScoutDbContext dbContext) : PageModel
             .SingleAsync(x => x.Id == id, cancellationToken);
 
         disc.NeedsReview = false;
-        disc.LastReviewedAt = TimeProvider.System.GetUtcNow();
+        disc.LastReviewedAt = TimeProvider.System.GetUtcNow().UtcDateTime;
         dbContext.DiscReviewReasons.RemoveRange(disc.ReviewReasons);
         await dbContext.SaveChangesAsync(cancellationToken);
         StatusMessage = $"「{disc.Title}」を確認済みにしました";
@@ -121,7 +121,7 @@ public sealed class DiscsModel(DiscaScoutDbContext dbContext) : PageModel
 
         disc.IsRented = true;
         disc.NeedsReview = false;
-        disc.LastReviewedAt = TimeProvider.System.GetUtcNow();
+        disc.LastReviewedAt = TimeProvider.System.GetUtcNow().UtcDateTime;
         dbContext.DiscReviewReasons.RemoveRange(disc.ReviewReasons);
         await dbContext.SaveChangesAsync(cancellationToken);
         StatusMessage = $"「{disc.Title}」を借りた状態にしました";

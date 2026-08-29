@@ -37,10 +37,10 @@ internal static class ArtistWatchModelBuilder
             b.Property<long>("Id").ValueGeneratedOnAdd().HasColumnType("INTEGER").HasAnnotation("Sqlite:Autoincrement", true);
             b.Property<long>("ArtistSettingId").HasColumnType("INTEGER");
             b.Property<long>("DiscId").HasColumnType("INTEGER");
-            b.Property<DateTimeOffset>("FirstMatchedAt").HasColumnType("TEXT");
+            b.Property<DateTime>("FirstMatchedAt").HasColumnType("TEXT");
             b.Property<bool>("IsCurrentMatch").HasColumnType("INTEGER");
-            b.Property<DateTimeOffset>("LastMatchedAt").HasColumnType("TEXT");
-            b.Property<DateTimeOffset?>("LastUnmatchedAt").HasColumnType("TEXT");
+            b.Property<DateTime>("LastMatchedAt").HasColumnType("TEXT");
+            b.Property<DateTime?>("LastUnmatchedAt").HasColumnType("TEXT");
             b.HasKey("Id");
             b.HasIndex("ArtistSettingId", "IsCurrentMatch");
             b.HasIndex("DiscId", "ArtistSettingId").IsUnique();

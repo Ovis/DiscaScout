@@ -36,9 +36,9 @@ public partial class AddArtistWatch : Migration
                 DiscId = table.Column<long>(type: "INTEGER", nullable: false),
                 ArtistSettingId = table.Column<long>(type: "INTEGER", nullable: false),
                 IsCurrentMatch = table.Column<bool>(type: "INTEGER", nullable: false),
-                FirstMatchedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
-                LastMatchedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
-                LastUnmatchedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true)
+                FirstMatchedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
+                LastMatchedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
+                LastUnmatchedAt = table.Column<DateTime>(type: "TEXT", nullable: true)
             },
             constraints: table =>
             {

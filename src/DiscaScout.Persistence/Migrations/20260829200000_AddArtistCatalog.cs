@@ -21,9 +21,9 @@ public partial class AddArtistCatalog : Migration
                 DiscId = table.Column<long>(type: "INTEGER", nullable: false),
                 ArtistSettingId = table.Column<long>(type: "INTEGER", nullable: false),
                 IsActive = table.Column<bool>(type: "INTEGER", nullable: false),
-                FirstSeenAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
-                LastSeenAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
-                DeactivatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true)
+                FirstSeenAt = table.Column<DateTime>(type: "TEXT", nullable: false),
+                LastSeenAt = table.Column<DateTime>(type: "TEXT", nullable: false),
+                DeactivatedAt = table.Column<DateTime>(type: "TEXT", nullable: true)
             },
             constraints: table =>
             {

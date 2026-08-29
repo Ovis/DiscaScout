@@ -36,7 +36,7 @@ public sealed class ArtistWatchTests
         await using var database = await TestDatabase.CreateAsync();
         var disc = CreateDisc("1001", "作品1", "梶浦由記");
         disc.NeedsReview = false;
-        disc.LastReviewedAt = DateTimeOffset.UtcNow;
+        disc.LastReviewedAt = DateTime.UtcNow;
         database.Context.Discs.Add(disc);
         await database.Context.SaveChangesAsync();
 
@@ -158,7 +158,7 @@ public sealed class ArtistWatchTests
 
     private static Disc CreateDisc(string id, string title, string artist)
     {
-        var now = DateTimeOffset.UtcNow;
+        var now = DateTime.UtcNow;
         return new Disc
         {
             DiscasId = id,

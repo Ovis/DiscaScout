@@ -106,11 +106,16 @@ public sealed class OperationsModel(
     }
 
     /// <summary>
-    /// UTCの履歴時刻を運用画面用の日本時間へ変換する
+    /// UTCで保存した履歴時刻を運用画面用の日本時間へ変換する
     /// </summary>
-    /// <param name="value">保存されている時刻</param>
+    /// <param name="value">UTCとして保存されている時刻</param>
     /// <returns>日本時間</returns>
-    public static DateTimeOffset ToJapanTime(DateTimeOffset value) => TimeZoneInfo.ConvertTime(value, JapanTimeZone);
+    public static DateTime ToJapanTime(DateTime value)
+    {
+        // SQLiteから読み出したDateTimeのKindに依存せず、永続値はUTCというモデル上の前提をここで明示する。
+        var utc = DateTime.SpecifyKind(value, DateTimeKind.Utc);
+        return TimeZoneInfo.ConvertTimeFromUtc(utc, JapanTimeZone);
+    }
 
     /// <summary>
     /// 曜日を日本語表示へ変換する

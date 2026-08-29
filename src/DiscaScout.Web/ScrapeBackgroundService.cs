@@ -40,7 +40,7 @@ public sealed class ScrapeBackgroundService(
         {
             await using var retryScope = scopeFactory.CreateAsyncScope();
             var operationsStore = retryScope.ServiceProvider.GetRequiredService<IScrapeOperationsStore>();
-            var retry = await operationsStore.GetNextDueRetryAsync(DateTimeOffset.UtcNow, cancellationToken);
+            var retry = await operationsStore.GetNextDueRetryAsync(DateTime.UtcNow, cancellationToken);
             if (retry is null)
             {
                 break;
