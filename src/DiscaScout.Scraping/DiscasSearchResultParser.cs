@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using AngleSharp.Dom;
 using AngleSharp.Html.Parser;
 
 namespace DiscaScout.Scraping;
@@ -10,7 +11,7 @@ public sealed partial class DiscasSearchResultParser
 {
     private const string ProductSelector = ".cd-product-item";
     private const string TitleSelector = ".card-title-searchCd";
-    private const string ArtistSelector = ".card-body-searchCd a[href*='artistsearchHmo.do']";
+    private const string ProductTitleSelector = ".card-body-searchCd .cd-search-product-title";
     private const string ImageSelector = ".card-img";
     private const string NoImagePath = "/img/jacket/no_image_cd_s.png";
 
@@ -69,14 +70,7 @@ public sealed partial class DiscasSearchResultParser
                 throw new DiscasSearchParseException($"商品{index + 1}のタイトルが空である");
             }
 
-            var artistLink = productElement.QuerySelector(ArtistSelector)
-                ?? throw new DiscasSearchParseException($"商品{index + 1}にアーティストリンクが存在しない");
-            var artist = NormalizeDisplayText(artistLink.TextContent);
-            if (string.IsNullOrWhiteSpace(artist))
-            {
-                throw new DiscasSearchParseException($"商品{index + 1}のアーティストが空である");
-            }
-
+            var artist = ExtractArtist(productElement, index);
             var imageUrl = ResolveImageUrl(productElement.QuerySelector(ImageSelector)?.GetAttribute("src"), pageUri);
 
             products.Add(new ScrapedDisc(
@@ -105,6 +99,27 @@ public sealed partial class DiscasSearchResultParser
     {
         var match = TitleIdRegex().Match(productUri.Query);
         return match.Success ? Uri.UnescapeDataString(match.Groups[1].Value) : null;
+    }
+
+    private static string ExtractArtist(IElement productElement, int productIndex)
+    {
+        var productTitles = productElement.QuerySelectorAll(ProductTitleSelector);
+
+        // DISCASのPC向け商品DOMでは、1つ目の見出しがタイトル、2つ目がアーティスト表示になっている。
+        // アーティスト名がリンクになることが多いが、全ジャンル検索ではリンクを持たない商品も存在するため、
+        // artistsearchHmo.do のURL形には依存せず、表示上の2つ目の見出しそのものを正とする。
+        if (productTitles.Length < 2)
+        {
+            throw new DiscasSearchParseException($"商品{productIndex + 1}にアーティスト表示が存在しない");
+        }
+
+        var artist = NormalizeDisplayText(productTitles[1].TextContent);
+        if (string.IsNullOrWhiteSpace(artist))
+        {
+            throw new DiscasSearchParseException($"商品{productIndex + 1}のアーティストが空である");
+        }
+
+        return artist;
     }
 
     private static string NormalizeDisplayText(string text)
