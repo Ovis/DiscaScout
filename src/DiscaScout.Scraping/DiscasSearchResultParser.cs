@@ -12,6 +12,7 @@ public sealed partial class DiscasSearchResultParser
     private const string ProductSelector = ".cd-product-item";
     private const string TitleSelector = ".card-title-searchCd";
     private const string ProductTitleSelector = ".card-body-searchCd .cd-search-product-title";
+    private const string UnavailableArtistSelector = ".card-body-searchCd .cd-search-artist-not-available";
     private const string ImageSelector = ".card-img";
     private const string NoImagePath = "/img/jacket/no_image_cd_s.png";
 
@@ -70,7 +71,7 @@ public sealed partial class DiscasSearchResultParser
                 throw new DiscasSearchParseException($"商品{index + 1}のタイトルが空である");
             }
 
-            var artist = ExtractArtist(productElement);
+            var artist = ExtractArtist(productElement, index);
             var imageUrl = ResolveImageUrl(productElement.QuerySelector(ImageSelector)?.GetAttribute("src"), pageUri);
 
             products.Add(new ScrapedDisc(
@@ -101,20 +102,32 @@ public sealed partial class DiscasSearchResultParser
         return match.Success ? Uri.UnescapeDataString(match.Groups[1].Value) : null;
     }
 
-    private static string? ExtractArtist(IElement productElement)
+    private static string ExtractArtist(IElement productElement, int productIndex)
     {
         var productTitles = productElement.QuerySelectorAll(ProductTitleSelector);
-
-        // DISCASのPC向け商品DOMでは通常、1つ目の見出しがタイトル、2つ目がアーティスト表示になっている。
-        // 全ジャンル検索では2つ目の見出し自体を持たない商品が実在するため、その場合はデータ欠損としてnullを保持する。
-        // titleIDと商品件数の整合性は別途検証するので、アーティスト欠損だけでカテゴリ全体を破棄しない。
-        if (productTitles.Length < 2)
+        if (productTitles.Length >= 2)
         {
-            return null;
+            var artist = NormalizeDisplayText(productTitles[1].TextContent);
+            if (!string.IsNullOrWhiteSpace(artist))
+            {
+                return artist;
+            }
         }
 
-        var artist = NormalizeDisplayText(productTitles[1].TextContent);
-        return string.IsNullOrWhiteSpace(artist) ? null : artist;
+        // DISCASでは通常のアーティストリンクを生成できない商品に対して、
+        // cd-search-artist-not-available という専用見出しへ表示名だけを出すケースがある。
+        // 実ページで確認したため、欠損値にせずこの表示を正式なフォールバックとして扱う。
+        var unavailableArtist = productElement.QuerySelector(UnavailableArtistSelector);
+        if (unavailableArtist is not null)
+        {
+            var artist = NormalizeDisplayText(unavailableArtist.TextContent);
+            if (!string.IsNullOrWhiteSpace(artist))
+            {
+                return artist;
+            }
+        }
+
+        throw new DiscasSearchParseException($"商品{productIndex + 1}にアーティスト表示が存在しない");
     }
 
     private static string NormalizeDisplayText(string text)
