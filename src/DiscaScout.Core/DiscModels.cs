@@ -32,6 +32,7 @@ public sealed class Disc
     public List<DiscSource> Sources { get; } = [];
     public List<DiscReviewReason> ReviewReasons { get; } = [];
     public List<DiscChangeHistory> ChangeHistory { get; } = [];
+    public List<DiscArtistMatch> ArtistMatches { get; } = [];
 }
 
 /// <summary>
