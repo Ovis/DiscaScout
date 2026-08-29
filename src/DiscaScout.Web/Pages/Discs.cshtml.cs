@@ -9,7 +9,7 @@ namespace DiscaScout.Web.Pages;
 /// <summary>
 /// 未チェック、Pickup、全件のCD一覧とレビュー状態変更を提供する
 /// </summary>
-public sealed class DiscsModel(DiscaScoutDbContext dbContext, TimeProvider timeProvider) : PageModel
+public sealed class DiscsModel(DiscaScoutDbContext dbContext) : PageModel
 {
     /// <summary>表示対象タブ</summary>
     [BindProperty(SupportsGet = true, Name = "tab")]
@@ -103,7 +103,7 @@ public sealed class DiscsModel(DiscaScoutDbContext dbContext, TimeProvider timeP
             .SingleAsync(x => x.Id == id, cancellationToken);
 
         disc.NeedsReview = false;
-        disc.LastReviewedAt = timeProvider.GetUtcNow();
+        disc.LastReviewedAt = TimeProvider.System.GetUtcNow();
         dbContext.DiscReviewReasons.RemoveRange(disc.ReviewReasons);
         await dbContext.SaveChangesAsync(cancellationToken);
         StatusMessage = $"「{disc.Title}」を確認済みにしました";
@@ -121,7 +121,7 @@ public sealed class DiscsModel(DiscaScoutDbContext dbContext, TimeProvider timeP
 
         disc.IsRented = true;
         disc.NeedsReview = false;
-        disc.LastReviewedAt = timeProvider.GetUtcNow();
+        disc.LastReviewedAt = TimeProvider.System.GetUtcNow();
         dbContext.DiscReviewReasons.RemoveRange(disc.ReviewReasons);
         await dbContext.SaveChangesAsync(cancellationToken);
         StatusMessage = $"「{disc.Title}」を借りた状態にしました";
