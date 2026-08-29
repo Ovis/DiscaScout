@@ -9,7 +9,9 @@ namespace DiscaScout.Web.Pages;
 /// <summary>
 /// CD単体のメタデータ、取得元、変更履歴、Artist Watch状態とレビュー操作を提供する
 /// </summary>
-public sealed class DiscDetailModel(DiscaScoutDbContext dbContext) : PageModel
+public sealed class DiscDetailModel(
+    DiscaScoutDbContext dbContext,
+    DiscDetailFetchSignal detailFetchSignal) : PageModel
 {
     private static readonly TimeZoneInfo JapanTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Asia/Tokyo");
 
@@ -38,6 +40,13 @@ public sealed class DiscDetailModel(DiscaScoutDbContext dbContext) : PageModel
         }
 
         Disc = disc;
+        if (!disc.DetailRefreshCompleted)
+        {
+            // 詳細画面で実際に参照されたCDは、全件を順番に補完するBackgroundServiceより先に確認したい。
+            // Web要求自体ではDISCASへアクセスせず、優先キューへ通知するだけにして画面表示を待たせない。
+            detailFetchSignal.Request(id);
+        }
+
         return Page();
     }
 
@@ -140,6 +149,34 @@ public sealed class DiscDetailModel(DiscaScoutDbContext dbContext) : PageModel
     public static string FormatJapanTime(DateTime? value) => value is null ? "-" : FormatJapanTime(value.Value);
 
     /// <summary>
+    /// 詳細情報の取得状態を表示用文字列へ変換する
+    /// </summary>
+    public static string FormatDetailStatus(Disc disc)
+    {
+        if (disc.DetailRefreshCompleted)
+        {
+            return "取得完了";
+        }
+
+        if (disc.DetailFetchedAt is null)
+        {
+            return "未取得（バックグラウンド取得待ち）";
+        }
+
+        return "取得済み（レンタル開始後に最終確認予定）";
+    }
+
+    /// <summary>
+    /// 2枚組判定を表示用文字列へ変換する
+    /// </summary>
+    public static string FormatTwoDisc(bool? isTwoDisc) => isTwoDisc switch
+    {
+        true => "2枚組",
+        false => "2枚組ではない",
+        null => "未取得"
+    };
+
+    /// <summary>
     /// ReviewReasonを日本語表示へ変換する
     /// </summary>
     public static string FormatReviewReason(DiscReviewReasonType reason) => reason switch
@@ -169,6 +206,7 @@ public sealed class DiscDetailModel(DiscaScoutDbContext dbContext) : PageModel
             .Include(x => x.Sources)
             .Include(x => x.ReviewReasons)
             .Include(x => x.ChangeHistory)
+            .Include(x => x.Tracks)
             .Include(x => x.ArtistMatches)
                 .ThenInclude(x => x.ArtistSetting)
             .Include(x => x.ArtistCatalogEntries)
