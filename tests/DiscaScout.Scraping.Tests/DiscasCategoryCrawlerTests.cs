@@ -21,7 +21,7 @@ public sealed class DiscasCategoryCrawlerTests
 
         using var httpClient = new HttpClient(new PageHandler(pages));
         var crawler = new DiscasCategoryCrawler(
-            new DiscasPageFetcher(httpClient),
+            new DiscasPageFetcher(httpClient, TimeSpan.Zero),
             new DiscasSearchResultParser());
 
         var result = await crawler.CrawlAsync(DiscSourceCategory.New);
@@ -30,6 +30,7 @@ public sealed class DiscasCategoryCrawlerTests
         Assert.Equal(3, result.PageCount);
         Assert.Equal(["1001", "1002", "1003", "1004", "1005"], result.Products.Select(x => x.DiscasId));
         Assert.Equal([1, 2, 3, 4, 5], result.Products.Select(x => x.SourceRank));
+        Assert.All(result.Products, product => Assert.Equal("J-POP", product.GenreLarge));
     }
 
     [Fact]
@@ -42,7 +43,7 @@ public sealed class DiscasCategoryCrawlerTests
 
         using var httpClient = new HttpClient(new PageHandler(pages));
         var crawler = new DiscasCategoryCrawler(
-            new DiscasPageFetcher(httpClient),
+            new DiscasPageFetcher(httpClient, TimeSpan.Zero),
             new DiscasSearchResultParser());
 
         var exception = await Assert.ThrowsAsync<DiscasCategoryCrawlException>(
@@ -63,7 +64,7 @@ public sealed class DiscasCategoryCrawlerTests
 
         using var httpClient = new HttpClient(new PageHandler(pages));
         var crawler = new DiscasCategoryCrawler(
-            new DiscasPageFetcher(httpClient),
+            new DiscasPageFetcher(httpClient, TimeSpan.Zero),
             new DiscasSearchResultParser());
 
         var exception = await Assert.ThrowsAsync<DiscasCategoryCrawlException>(
@@ -87,15 +88,14 @@ public sealed class DiscasCategoryCrawlerTests
             products.Select(x => $"""
                 <div class="cd-product-item">
                   <div class="card-body-searchCd">
-                    <h3 class="cd-search-product-title">
-                      <a class="card-title-searchCd" href="goodsDetail.do?titleID={x.Id}">{x.Title}</a>
-                    </h3>
-                    <h3 class="cd-search-product-title">
-                      <a href="artistsearchHmo.do?a=1">アーティスト{x.Id}</a>
-                    </h3>
+                    <h3 class="cd-search-product-title"><a class="card-title-searchCd" href="goodsDetail.do?titleID={x.Id}">{x.Title}</a></h3>
+                    <h3 class="cd-search-product-title"><a href="artistsearchHmo.do?a=1">アーティスト{x.Id}</a></h3>
                   </div>
                   <img class="card-img" src="https://img.discas.net/img/jacket/{x.Id}.jpg">
                 </div>
+                <script>
+                  var itemTopGATag{x.Id} = {{event:'teigaku_search_cd', category:'CD', genre_large:'J-POP', genre_mid:'J-POP', genre_min:'null', titleid:'{x.Id}'}};
+                </script>
                 """));
 
         return $"""
