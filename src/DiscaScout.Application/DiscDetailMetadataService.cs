@@ -53,7 +53,10 @@ public sealed class DiscDetailMetadataService(
             .Where(x =>
                 (x.DetailFetchedAt == null && (x.DetailLastAttemptAt == null || x.DetailLastAttemptAt <= retryBefore))
                 || (x.DetailFetchedAt != null && x.RentalStartDate != null && x.RentalStartDate <= today))
-            .OrderBy(x => x.DetailFetchedAt != null)
+            // レンタル履歴インポート直後は過去に借りたCDの情報を早く揃えたいので、
+            // 通常の未取得CDより先に選ぶ。個別の詳細画面要求はSignal側でさらに優先される。
+            .OrderBy(x => x.RentalHistoryImportedAt == null)
+            .ThenBy(x => x.DetailFetchedAt != null)
             .ThenBy(x => x.DetailLastAttemptAt)
             .ThenBy(x => x.Id)
             .Select(x => (long?)x.Id)
