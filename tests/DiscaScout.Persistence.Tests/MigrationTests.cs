@@ -1,15 +1,16 @@
+using DiscaScout.Core;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
 namespace DiscaScout.Persistence.Tests;
 
 /// <summary>
-/// 永続DBを破棄せず起動時Migrationで初期スキーマを作成できることを検証する
+/// 永続DBを破棄せず起動時Migrationで最新スキーマを作成できることを検証する
 /// </summary>
 public sealed class MigrationTests
 {
     [Fact]
-    public async Task MigrateAsync_空DBへ初期スキーマを作成する()
+    public async Task MigrateAsync_空DBへ最新スキーマを作成する()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -30,5 +31,13 @@ public sealed class MigrationTests
         Assert.False(settings.IsEnabled);
         Assert.Equal(DayOfWeek.Sunday, settings.DayOfWeek);
         Assert.Equal(new TimeOnly(4, 0), settings.LocalTime);
+
+        var guardStore = new ScrapeGuardStore(dbContext);
+        var enabledAt = new DateTime(2026, 8, 30, 3, 0, 0, DateTimeKind.Utc);
+        await guardStore.EnableCountDropOverrideAsync(ScrapeCategory.New, enabledAt);
+        dbContext.ChangeTracker.Clear();
+        var guard = await guardStore.GetAsync(ScrapeCategory.New);
+        Assert.True(guard.IsCountDropOverrideEnabled);
+        Assert.Equal(enabledAt, guard.CountDropOverrideEnabledAt);
     }
 }
