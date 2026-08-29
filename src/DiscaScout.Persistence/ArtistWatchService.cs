@@ -44,6 +44,62 @@ public sealed class ArtistWatchService(DiscaScoutDbContext dbContext, TimeProvid
     }
 
     /// <summary>
+    /// アーティスト設定を更新し、変更後の条件で既存CDを再評価する
+    /// </summary>
+    /// <param name="artistSettingId">更新対象の設定ID</param>
+    /// <param name="artist">表示用のアーティスト名</param>
+    /// <param name="matchType">アーティスト一致方法</param>
+    /// <param name="isWatchEnabled">新着Watchを有効にするか</param>
+    /// <param name="collectFullCatalog">全作品収集を有効にするか</param>
+    /// <param name="reopenExistingReviewedMatches">新たに一致した既存CDを未チェックへ戻すか</param>
+    public async Task UpdateAsync(
+        long artistSettingId,
+        string artist,
+        ArtistMatchType matchType,
+        bool isWatchEnabled,
+        bool collectFullCatalog,
+        bool reopenExistingReviewedMatches,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(artist);
+
+        var setting = await dbContext.ArtistSettings
+            .SingleAsync(x => x.Id == artistSettingId, cancellationToken);
+        setting.Artist = artist.Trim();
+        setting.NormalizedArtist = DiscTextNormalizer.Normalize(artist);
+        setting.MatchType = matchType;
+        setting.IsWatchEnabled = isWatchEnabled;
+        setting.CollectFullCatalog = collectFullCatalog;
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        await ReevaluateAsync(setting.Id, reopenExistingReviewedMatches, cancellationToken);
+    }
+
+    /// <summary>
+    /// アーティスト設定をアーカイブまたは復元する
+    /// </summary>
+    /// <remarks>
+    /// アーカイブ時はWatch/全作品収集フラグや一致履歴を変更しない。復元時は、アーカイブ中に
+    /// CDのArtist表記が変化している可能性があるため、ローカルCDとの一致状態だけ再評価する。
+    /// </remarks>
+    public async Task SetArchivedAsync(
+        long artistSettingId,
+        bool isArchived,
+        bool reopenExistingReviewedMatches = false,
+        CancellationToken cancellationToken = default)
+    {
+        var setting = await dbContext.ArtistSettings
+            .SingleAsync(x => x.Id == artistSettingId, cancellationToken);
+        setting.IsArchived = isArchived;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        if (!isArchived)
+        {
+            await ReevaluateAsync(setting.Id, reopenExistingReviewedMatches, cancellationToken);
+        }
+    }
+
+    /// <summary>
     /// 指定した設定条件で全CDの現在一致状態を再評価する
     /// </summary>
     /// <remarks>
@@ -65,7 +121,7 @@ public sealed class ArtistWatchService(DiscaScoutDbContext dbContext, TimeProvid
 
         foreach (var disc in discs)
         {
-            var shouldMatch = !setting.IsArchived && ArtistWatchMatcher.IsMatch(disc.NormalizedArtist, setting);
+            var shouldMatch = ArtistWatchMatcher.IsMatch(disc.NormalizedArtist, setting);
             var relation = disc.ArtistMatches.SingleOrDefault(x => x.ArtistSettingId == setting.Id);
 
             if (shouldMatch)
@@ -81,7 +137,7 @@ public sealed class ArtistWatchService(DiscaScoutDbContext dbContext, TimeProvid
                     };
                     disc.ArtistMatches.Add(relation);
 
-                    if (setting.IsWatchEnabled && reopenExistingReviewedMatches && !disc.IsRented)
+                    if (!setting.IsArchived && setting.IsWatchEnabled && reopenExistingReviewedMatches && !disc.IsRented)
                     {
                         AddArtistMatchedReason(disc, now);
                     }
@@ -92,7 +148,7 @@ public sealed class ArtistWatchService(DiscaScoutDbContext dbContext, TimeProvid
                     relation.LastMatchedAt = now;
                     relation.LastUnmatchedAt = null;
 
-                    if (setting.IsWatchEnabled && reopenExistingReviewedMatches && !disc.IsRented)
+                    if (!setting.IsArchived && setting.IsWatchEnabled && reopenExistingReviewedMatches && !disc.IsRented)
                     {
                         AddArtistMatchedReason(disc, now);
                     }
