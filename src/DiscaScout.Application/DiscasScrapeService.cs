@@ -51,24 +51,26 @@ public sealed class DiscasScrapeService(
                     "取得件数が0件のためDBへの反映を中止した");
             }
 
-            var isCountDrop = previousAccepted?.FetchedCount is int previousCount
-                && (long)snapshot.TotalCount * 100 < (long)previousCount * MinimumAcceptedPercent;
+            var previousCount = previousAccepted?.FetchedCount;
+            var isCountDrop = previousCount.HasValue
+                && (long)snapshot.TotalCount * 100 < (long)previousCount.Value * MinimumAcceptedPercent;
 
             var overrideUsed = false;
             if (isCountDrop)
             {
+                var baselineCount = previousCount!.Value;
                 var guardSettings = await guardStore.GetAsync(scrapeCategory, cancellationToken);
                 if (!guardSettings.IsCountDropOverrideEnabled)
                 {
-                    var ratio = (double)snapshot.TotalCount / previousCount * 100;
+                    var ratio = (double)snapshot.TotalCount / baselineCount * 100;
                     return CategoryScrapeResult.AbnormalCountFailure(
                         category,
                         AbnormalCountReason.CountDrop,
                         snapshot.TotalCount,
                         snapshot.PageCount,
-                        previousCount,
+                        baselineCount,
                         previousAccepted?.PageCount,
-                        $"前回正常件数 {previousCount}件 に対して今回 {snapshot.TotalCount}件 ({ratio:F1}%) となり、許容下限 {MinimumAcceptedPercent}% を下回ったためDBへの反映を中止した");
+                        $"前回正常件数 {baselineCount}件 に対して今回 {snapshot.TotalCount}件 ({ratio:F1}%) となり、許容下限 {MinimumAcceptedPercent}% を下回ったためDBへの反映を中止した");
                 }
 
                 overrideUsed = true;
