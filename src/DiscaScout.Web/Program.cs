@@ -5,7 +5,6 @@ using DiscaScout.Web;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
-
 var databasePath = builder.Configuration["DiscaScout:DatabasePath"] ?? "data/discascout.db";
 var imageCachePath = builder.Configuration["DiscaScout:ImageCachePath"] ?? "data/images";
 var databaseDirectory = Path.GetDirectoryName(Path.GetFullPath(databasePath));
@@ -14,52 +13,28 @@ Directory.CreateDirectory(Path.GetFullPath(imageCachePath));
 
 builder.Services.AddRazorPages();
 builder.Services.AddDbContext<DiscaScoutDbContext>(options => options.UseSqlite($"Data Source={databasePath}"));
-
-// DISCAS HTMLはCategory/Artist Catalog/詳細ページをまたいで完全直列化し、最低2秒間隔と10ページごとの追加休止を共有する。
 builder.Services.AddSingleton<DiscasRequestThrottle>();
 builder.Services.AddHttpClient<DiscasPageFetcher>();
-
-// Discordは取得処理とは独立した監視経路として扱い、Webhook障害で本体処理を失敗させない。
+// Discordは取得処理とは独立した監視経路として扱い、設定自体は運用画面からSQLiteへ保存する。
 builder.Services.AddHttpClient("discord-webhook");
+builder.Services.AddScoped<DiscordNotificationSettingsStore>();
 builder.Services.AddScoped<DiscordNotificationService>();
-
-// ジャケット画像はDISCAS HTMLとは独立したBackgroundServiceで最大4並列取得する。
 builder.Services.AddHttpClient("disc-image-cache");
-builder.Services.AddScoped<DiscasSearchResultParser>();
-builder.Services.AddScoped<DiscasDiscDetailParser>();
-builder.Services.AddScoped<DiscasCategoryCrawler>();
-builder.Services.AddScoped<IDiscasCategoryCrawler>(sp => sp.GetRequiredService<DiscasCategoryCrawler>());
-builder.Services.AddScoped<DiscasArtistCatalogCrawler>();
-builder.Services.AddScoped<IDiscasArtistCatalogCrawler>(sp => sp.GetRequiredService<DiscasArtistCatalogCrawler>());
-builder.Services.AddScoped<DiscasSnapshotApplier>();
-builder.Services.AddScoped<IDiscasSnapshotStore, DiscasSnapshotStore>();
-builder.Services.AddScoped<ArtistWatchService>();
-builder.Services.AddScoped<ArtistCatalogStore>();
+builder.Services.AddScoped<DiscasSearchResultParser>(); builder.Services.AddScoped<DiscasDiscDetailParser>();
+builder.Services.AddScoped<DiscasCategoryCrawler>(); builder.Services.AddScoped<IDiscasCategoryCrawler>(sp => sp.GetRequiredService<DiscasCategoryCrawler>());
+builder.Services.AddScoped<DiscasArtistCatalogCrawler>(); builder.Services.AddScoped<IDiscasArtistCatalogCrawler>(sp => sp.GetRequiredService<DiscasArtistCatalogCrawler>());
+builder.Services.AddScoped<DiscasSnapshotApplier>(); builder.Services.AddScoped<IDiscasSnapshotStore, DiscasSnapshotStore>();
+builder.Services.AddScoped<ArtistWatchService>(); builder.Services.AddScoped<ArtistCatalogStore>();
 builder.Services.AddScoped(sp => new DiscImageCacheService(sp.GetRequiredService<DiscaScoutDbContext>(), sp.GetRequiredService<IHttpClientFactory>().CreateClient("disc-image-cache"), Path.GetFullPath(imageCachePath)));
-builder.Services.AddScoped<ArtistCatalogCollectionService>();
-builder.Services.AddScoped<DiscDetailMetadataService>();
-builder.Services.AddScoped<ScrapeOperationsStore>();
-builder.Services.AddScoped<IScrapeOperationsStore>(sp => sp.GetRequiredService<ScrapeOperationsStore>());
-builder.Services.AddScoped<IScrapeOperationsQueryStore>(sp => sp.GetRequiredService<ScrapeOperationsStore>());
-builder.Services.AddScoped<IScrapeScheduleStore, ScrapeScheduleStore>();
-builder.Services.AddScoped<ManualWorkStore>();
-builder.Services.AddScoped<DiscasScrapeService>();
-builder.Services.AddScoped<ScrapeRunCoordinator>();
-builder.Services.AddSingleton<ScrapeExecutionGate>();
-builder.Services.AddSingleton<ManualWorkSignal>();
-builder.Services.AddSingleton<DiscDetailFetchSignal>();
-builder.Services.AddHostedService<ScrapeBackgroundService>();
-builder.Services.AddHostedService<DiscImageCacheBackgroundService>();
-builder.Services.AddHostedService<DiscDetailMetadataBackgroundService>();
+builder.Services.AddScoped<ArtistCatalogCollectionService>(); builder.Services.AddScoped<DiscDetailMetadataService>();
+builder.Services.AddScoped<ScrapeOperationsStore>(); builder.Services.AddScoped<IScrapeOperationsStore>(sp => sp.GetRequiredService<ScrapeOperationsStore>()); builder.Services.AddScoped<IScrapeOperationsQueryStore>(sp => sp.GetRequiredService<ScrapeOperationsStore>());
+builder.Services.AddScoped<IScrapeScheduleStore, ScrapeScheduleStore>(); builder.Services.AddScoped<ManualWorkStore>(); builder.Services.AddScoped<DiscasScrapeService>(); builder.Services.AddScoped<ScrapeRunCoordinator>();
+builder.Services.AddSingleton<ScrapeExecutionGate>(); builder.Services.AddSingleton<ManualWorkSignal>(); builder.Services.AddSingleton<DiscDetailFetchSignal>();
+builder.Services.AddHostedService<ScrapeBackgroundService>(); builder.Services.AddHostedService<DiscImageCacheBackgroundService>(); builder.Services.AddHostedService<DiscDetailMetadataBackgroundService>();
 
 var app = builder.Build();
-await using (var scope = app.Services.CreateAsyncScope())
-{
-    await scope.ServiceProvider.GetRequiredService<DiscaScoutDbContext>().Database.MigrateAsync();
-}
-
-app.MapGet("/", () => Results.Redirect("/discs"));
-app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+await using (var scope = app.Services.CreateAsyncScope()) await scope.ServiceProvider.GetRequiredService<DiscaScoutDbContext>().Database.MigrateAsync();
+app.MapGet("/", () => Results.Redirect("/discs")); app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapGet("/disc-image/{id:long}", async (long id, DiscaScoutDbContext dbContext, CancellationToken cancellationToken) =>
 {
     var imagePath = await dbContext.Discs.AsNoTracking().Where(x => x.Id == id).Select(x => x.ImagePath).SingleOrDefaultAsync(cancellationToken);
