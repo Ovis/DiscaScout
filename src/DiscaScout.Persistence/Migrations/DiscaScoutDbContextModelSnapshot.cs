@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 namespace DiscaScout.Persistence.Migrations;
 
 /// <summary>
-/// InitialCreate時点のEF Coreモデルを固定し、後続Migrationとの差分基準として使用する
+/// 最新のEF Coreモデルを固定し、後続Migrationとの差分基準として使用する
 /// </summary>
 [DbContext(typeof(DiscaScoutDbContext))]
 public sealed class DiscaScoutDbContextModelSnapshot : ModelSnapshot
@@ -14,6 +14,6 @@ public sealed class DiscaScoutDbContextModelSnapshot : ModelSnapshot
     /// <inheritdoc />
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
-        MigrationModelBuilder.Build(modelBuilder);
+        ArtistWatchModelBuilder.Build(modelBuilder);
     }
 }
