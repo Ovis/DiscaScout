@@ -43,8 +43,8 @@ public sealed class OperationsModel(
     /// <summary>直近の手動処理要求履歴</summary>
     public IReadOnlyList<ManualWorkItem> RecentManualWork { get; private set; } = [];
 
-    /// <summary>通常の手動取得が既に保留または実行中か</summary>
-    public bool IsFullScrapeActive => ActiveManualWork.Any(x => x.Type == ManualWorkType.FullScrape);
+    /// <summary>通常取得系の手動処理が既に保留または実行中か</summary>
+    public bool IsFullScrapeActive => ActiveManualWork.Any(x => x.Type is ManualWorkType.FullScrape or ManualWorkType.CategoryScrape);
 
     /// <summary>処理後に表示する短いメッセージ</summary>
     [TempData]
@@ -106,7 +106,7 @@ public sealed class OperationsModel(
         }
         else
         {
-            StatusMessage = "手動取得は既に保留中または実行中です";
+            StatusMessage = "通常取得系の手動処理は既に保留中または実行中です";
         }
 
         return RedirectToPage();
@@ -128,6 +128,23 @@ public sealed class OperationsModel(
     /// 曜日を日本語表示へ変換する
     /// </summary>
     public static string GetDayLabel(DayOfWeek value) => DayOptions.First(x => x.Value == value).Label;
+
+    /// <summary>手動処理種別を画面表示用の日本語へ変換する</summary>
+    public static string GetManualWorkTypeLabel(ManualWorkType type) => type switch
+    {
+        ManualWorkType.FullScrape => "通常取得",
+        ManualWorkType.CategoryScrape => "カテゴリ取得",
+        ManualWorkType.ArtistCatalog => "Artist全作品",
+        _ => type.ToString()
+    };
+
+    /// <summary>手動処理の対象を画面表示用に整形する</summary>
+    public static string GetManualWorkTarget(ManualWorkItem work) => work.Type switch
+    {
+        ManualWorkType.CategoryScrape => work.Category?.ToString() ?? "-",
+        ManualWorkType.ArtistCatalog => work.ArtistSettingId?.ToString() ?? "-",
+        _ => "-"
+    };
 
     private async Task LoadAsync(CancellationToken cancellationToken)
     {
