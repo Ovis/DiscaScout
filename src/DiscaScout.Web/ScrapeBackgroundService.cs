@@ -161,7 +161,7 @@ public sealed class ScrapeBackgroundService(
                                 throw new ArgumentOutOfRangeException(nameof(item.Type), item.Type, null);
                         }
 
-                        return true;
+                        return ManualWorkExecutionMarker.Instance;
                     },
                     cancellationToken);
 
@@ -193,5 +193,13 @@ public sealed class ScrapeBackgroundService(
     {
         // DiscaScoutは日本国内のDISCAS運用を前提とするため、コンテナのTZ設定に依存せず日本時間で予定時刻を判定する。
         return TimeZoneInfo.FindSystemTimeZoneById("Asia/Tokyo");
+    }
+
+    /// <summary>
+    /// ScrapeExecutionGateの「実行できた / busyだった」をnullで判別するための参照型マーカー
+    /// </summary>
+    private sealed class ManualWorkExecutionMarker
+    {
+        public static ManualWorkExecutionMarker Instance { get; } = new();
     }
 }
