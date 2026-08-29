@@ -9,7 +9,7 @@
 <style>
 :root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif}body{margin:0;background:#f6f7f9;color:#20242a}main{max-width:900px;margin:0 auto;padding:28px}nav{display:flex;gap:14px;margin-bottom:18px;font-size:14px}nav a{color:#165dce;text-decoration:none}.card{background:white;border:1px solid #dfe3e8;border-radius:10px;padding:20px;margin-top:22px}label{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;margin-bottom:16px}select,input[type=url]{padding:9px;border:1px solid #c9ced6;border-radius:6px;background:white}input[type=url]{width:min(720px,95%)}button{border:0;border-radius:6px;padding:9px 15px;font-weight:650;cursor:pointer;background:#165dce;color:white}.muted{color:#68707c;font-size:13px}.status{margin-top:18px;padding:12px 14px;background:#eef4ff;border:1px solid #cbdcff;border-radius:8px}.validation{color:#b42318;font-size:13px}
 </style></head><body><main>
-<nav><a href="/discs">CD一覧</a><a href="/artists">Artist設定</a><a href="/operations">運用</a><a href="/settings">設定</a></nav>
+<partial name="_Navigation" />
 <h1>設定</h1><div class="muted">アプリケーション全体の設定を管理します。</div>
 @if (!string.IsNullOrWhiteSpace(Model.StatusMessage)){<div class="status">@Model.StatusMessage</div>}
 <section class="card"><h2>Discord通知</h2>
