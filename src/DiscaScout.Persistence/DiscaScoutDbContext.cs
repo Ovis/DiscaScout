@@ -18,6 +18,7 @@ public sealed class DiscaScoutDbContext(DbContextOptions<DiscaScoutDbContext> op
     public DbSet<ScrapeRun> ScrapeRuns => Set<ScrapeRun>();
     public DbSet<ScrapeRetry> ScrapeRetries => Set<ScrapeRetry>();
     public DbSet<ScrapeScheduleSettings> ScrapeScheduleSettings => Set<ScrapeScheduleSettings>();
+    public DbSet<ManualWorkItem> ManualWorkItems => Set<ManualWorkItem>();
 
     /// <summary>
     /// ドメインモデルとSQLiteテーブルの制約・インデックスを構成する
@@ -118,5 +119,12 @@ public sealed class DiscaScoutDbContext(DbContextOptions<DiscaScoutDbContext> op
         var schedule = modelBuilder.Entity<ScrapeScheduleSettings>();
         schedule.HasKey(x => x.Id);
         schedule.Property(x => x.Id).ValueGeneratedNever();
+
+        var manualWork = modelBuilder.Entity<ManualWorkItem>();
+        manualWork.HasKey(x => x.Id);
+        manualWork.Property(x => x.FailureReason).HasMaxLength(1000);
+        manualWork.HasIndex(x => new { x.Status, x.RequestedAt });
+        manualWork.HasIndex(x => new { x.Type, x.Status });
+        manualWork.HasIndex(x => new { x.ArtistSettingId, x.Status });
     }
 }
