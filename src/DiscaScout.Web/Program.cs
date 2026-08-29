@@ -28,7 +28,7 @@ builder.Services.AddScoped<DiscasArtistCatalogCrawler>(); builder.Services.AddSc
 builder.Services.AddScoped<DiscasSnapshotApplier>(); builder.Services.AddScoped<IDiscasSnapshotStore, DiscasSnapshotStore>();
 builder.Services.AddScoped<ArtistWatchService>(); builder.Services.AddScoped<ArtistCatalogStore>();
 builder.Services.AddScoped(sp => new DiscImageCacheService(sp.GetRequiredService<DiscaScoutDbContext>(), sp.GetRequiredService<IHttpClientFactory>().CreateClient("disc-image-cache"), Path.GetFullPath(imageCachePath)));
-builder.Services.AddScoped<ArtistCatalogCollectionService>(); builder.Services.AddScoped<DiscDetailMetadataService>();
+builder.Services.AddScoped<ArtistCatalogCollectionService>(); builder.Services.AddScoped<DiscDetailMetadataService>(); builder.Services.AddScoped<RentalHistoryImportService>();
 builder.Services.AddScoped<ScrapeOperationsStore>(); builder.Services.AddScoped<IScrapeOperationsStore>(sp => sp.GetRequiredService<ScrapeOperationsStore>()); builder.Services.AddScoped<IScrapeOperationsQueryStore>(sp => sp.GetRequiredService<ScrapeOperationsStore>());
 builder.Services.AddScoped<ScrapeGuardStore>(); builder.Services.AddScoped<IScrapeGuardStore>(sp => sp.GetRequiredService<ScrapeGuardStore>());
 builder.Services.AddScoped<IScrapeScheduleStore, ScrapeScheduleStore>(); builder.Services.AddScoped<ManualWorkStore>(); builder.Services.AddScoped<DiscasScrapeService>(); builder.Services.AddScoped<ScrapeRunCoordinator>();
