@@ -19,6 +19,7 @@ public sealed class DiscaScoutDbContext(DbContextOptions<DiscaScoutDbContext> op
     public DbSet<ScrapeRun> ScrapeRuns => Set<ScrapeRun>();
     public DbSet<ScrapeRetry> ScrapeRetries => Set<ScrapeRetry>();
     public DbSet<ScrapeScheduleSettings> ScrapeScheduleSettings => Set<ScrapeScheduleSettings>();
+    public DbSet<ScrapeGuardSettings> ScrapeGuardSettings => Set<ScrapeGuardSettings>();
     public DbSet<ManualWorkItem> ManualWorkItems => Set<ManualWorkItem>();
     public DbSet<DiscordNotificationSettings> DiscordNotificationSettings => Set<DiscordNotificationSettings>();
 
@@ -52,6 +53,10 @@ public sealed class DiscaScoutDbContext(DbContextOptions<DiscaScoutDbContext> op
         var scrapeRun = modelBuilder.Entity<ScrapeRun>(); scrapeRun.HasKey(x => x.Id); scrapeRun.Property(x => x.FailureReason).HasMaxLength(1000); scrapeRun.HasIndex(x => new { x.Category, x.StartedAt }); scrapeRun.HasIndex(x => x.IsSuccess);
         var scrapeRetry = modelBuilder.Entity<ScrapeRetry>(); scrapeRetry.HasKey(x => x.Id); scrapeRetry.HasIndex(x => new { x.Status, x.DueAt }); scrapeRetry.HasIndex(x => new { x.Category, x.Status });
         var schedule = modelBuilder.Entity<ScrapeScheduleSettings>(); schedule.HasKey(x => x.Id); schedule.Property(x => x.Id).ValueGeneratedNever();
+
+        // 安全装置はカテゴリごとに1行だけ保持し、明示的な急減許可が再起動をまたいでも失われないようにする。
+        var scrapeGuard = modelBuilder.Entity<ScrapeGuardSettings>(); scrapeGuard.HasKey(x => x.Category); scrapeGuard.Property(x => x.Category).ValueGeneratedNever();
+
         var manualWork = modelBuilder.Entity<ManualWorkItem>(); manualWork.HasKey(x => x.Id); manualWork.Property(x => x.FailureReason).HasMaxLength(1000); manualWork.HasIndex(x => new { x.Status, x.RequestedAt }); manualWork.HasIndex(x => new { x.Type, x.Status }); manualWork.HasIndex(x => new { x.ArtistSettingId, x.Status });
 
         // Webhook URLは運用画面から変更する単一設定なので固定IDの1行として保持する。
