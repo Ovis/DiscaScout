@@ -13,6 +13,8 @@ public interface IScrapeOperationsStore
     Task CancelPendingRetriesAsync(ScrapeCategory category, DateTimeOffset resolvedAt, CancellationToken cancellationToken = default);
     Task CompleteRetryAsync(long retryId, DateTimeOffset resolvedAt, CancellationToken cancellationToken = default);
     Task<ScrapeRetry?> GetNextDueRetryAsync(DateTimeOffset now, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ScrapeRun>> GetRecentRunsAsync(int count, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ScrapeRetry>> GetPendingRetriesAsync(CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -100,5 +102,32 @@ public sealed class ScrapeOperationsStore(DiscaScoutDbContext dbContext) : IScra
             .Where(x => x.Status == ScrapeRetryStatus.Pending && x.DueAt <= now)
             .OrderBy(x => x.DueAt)
             .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ScrapeRun>> GetRecentRunsAsync(
+        int count,
+        CancellationToken cancellationToken = default)
+    {
+        if (count <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(count));
+        }
+
+        return await dbContext.ScrapeRuns
+            .AsNoTracking()
+            .OrderByDescending(x => x.StartedAt)
+            .Take(count)
+            .ToListAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ScrapeRetry>> GetPendingRetriesAsync(CancellationToken cancellationToken = default)
+    {
+        return await dbContext.ScrapeRetries
+            .AsNoTracking()
+            .Where(x => x.Status == ScrapeRetryStatus.Pending)
+            .OrderBy(x => x.DueAt)
+            .ToListAsync(cancellationToken);
     }
 }
