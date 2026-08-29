@@ -76,14 +76,9 @@ public sealed class DiscasScrapeService(
                 overrideUsed = true;
             }
 
-            var applyResult = await snapshotStore.ApplyAsync(snapshot, cancellationToken);
-
-            if (overrideUsed)
-            {
-                // 許可は取得開始時ではなく、完全スナップショットのDB反映が成功した後にだけ消費する。
-                // 通信・解析・永続化失敗で利用者が再度許可操作を行う必要が生じないようにするためである。
-                await guardStore.ConsumeCountDropOverrideAsync(scrapeCategory, cancellationToken);
-            }
+            // 急減許可を利用する場合は、スナップショット反映と許可消費を永続化層の同一トランザクションへ含める。
+            // 片方だけ成功するとRetryでMissingCountを二重加算する可能性があるため、ここでは別々に保存しない。
+            var applyResult = await snapshotStore.ApplyAsync(snapshot, overrideUsed, cancellationToken);
 
             return CategoryScrapeResult.Success(
                 category,
