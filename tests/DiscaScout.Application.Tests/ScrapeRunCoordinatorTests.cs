@@ -181,7 +181,10 @@ public sealed class ScrapeRunCoordinatorTests
 
     private sealed class StubSnapshotStore : IDiscasSnapshotStore
     {
-        public Task<SnapshotApplyResult> ApplyAsync(DiscasCategorySnapshot snapshot, CancellationToken cancellationToken = default)
+        public Task<SnapshotApplyResult> ApplyAsync(
+            DiscasCategorySnapshot snapshot,
+            bool consumeCountDropOverride = false,
+            CancellationToken cancellationToken = default)
             => Task.FromResult(new SnapshotApplyResult(1, 0, 0));
     }
 
