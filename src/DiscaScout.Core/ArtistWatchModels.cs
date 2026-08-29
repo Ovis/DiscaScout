@@ -36,9 +36,9 @@ public sealed class DiscArtistMatch
     public long ArtistSettingId { get; set; }
     public ArtistSetting ArtistSetting { get; set; } = null!;
     public bool IsCurrentMatch { get; set; }
-    public DateTimeOffset FirstMatchedAt { get; set; }
-    public DateTimeOffset LastMatchedAt { get; set; }
-    public DateTimeOffset? LastUnmatchedAt { get; set; }
+    public DateTime FirstMatchedAt { get; set; }
+    public DateTime LastMatchedAt { get; set; }
+    public DateTime? LastUnmatchedAt { get; set; }
 }
 
 /// <summary>
@@ -52,9 +52,9 @@ public sealed class DiscArtistCatalog
     public long ArtistSettingId { get; set; }
     public ArtistSetting ArtistSetting { get; set; } = null!;
     public bool IsActive { get; set; }
-    public DateTimeOffset FirstSeenAt { get; set; }
-    public DateTimeOffset LastSeenAt { get; set; }
-    public DateTimeOffset? DeactivatedAt { get; set; }
+    public DateTime FirstSeenAt { get; set; }
+    public DateTime LastSeenAt { get; set; }
+    public DateTime? DeactivatedAt { get; set; }
 }
 
 /// <summary>
