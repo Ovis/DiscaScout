@@ -75,20 +75,14 @@ public sealed class DiscImageCacheService
     }
 
     /// <summary>
-    /// 未取得またはURL変更済みの画像を最大件数まで同期する
+    /// 現在未取得またはURL変更済みの画像を持つCD ID一覧を取得する
     /// </summary>
-    /// <param name="maxCount">1バッチで処理する最大CD数</param>
-    /// <param name="cancellationToken">同期処理を中断するためのトークン</param>
-    /// <returns>同期件数と失敗件数</returns>
-    public async Task<DiscImageCacheResult> SyncPendingBatchAsync(
-        int maxCount,
-        CancellationToken cancellationToken = default)
+    /// <remarks>
+    /// Workerはこの一覧を一巡分のスナップショットとして保持する。失敗画像を同じ巡回中に
+    /// 即時再試行し続けないため、DBから毎バッチ先頭40件を取り直す方式にはしない。
+    /// </remarks>
+    public async Task<IReadOnlyList<string>> GetPendingDiscasIdsAsync(CancellationToken cancellationToken = default)
     {
-        if (maxCount <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(maxCount));
-        }
-
         var candidates = await dbContext.Discs
             .AsNoTracking()
             .Where(x => x.ImageUrl != null || x.ImagePath != null)
@@ -96,13 +90,10 @@ public sealed class DiscImageCacheService
             .Select(x => new { x.DiscasId, x.ImageUrl, x.ImagePath })
             .ToListAsync(cancellationToken);
 
-        var pendingIds = candidates
+        return candidates
             .Where(x => IsPending(x.DiscasId, x.ImageUrl, x.ImagePath))
-            .Take(maxCount)
             .Select(x => x.DiscasId)
             .ToArray();
-
-        return await SyncAsync(pendingIds, cancellationToken);
     }
 
     /// <summary>
@@ -256,7 +247,6 @@ public sealed class DiscImageCacheService
             }
             catch
             {
-                // 画像取得失敗は検索結果の完全性とは独立しているため、次回BackgroundService実行で再試行する。
                 TryDelete(target.TemporaryPath);
                 return new ImageDownloadResult(target, false);
             }
@@ -330,11 +320,9 @@ public sealed class DiscImageCacheService
         }
         catch (IOException)
         {
-            // DBは既に新しいImagePathへ切り替わっているため、旧ファイル削除失敗で処理全体を戻さない。
         }
         catch (UnauthorizedAccessException)
         {
-            // 一時的なファイルシステム要因で新しいキャッシュまで無効にしない。
         }
     }
 
@@ -355,8 +343,4 @@ public sealed record DiscImageCacheResult(
     int CachedCount,
     int SkippedCount,
     int ClearedCount,
-    int FailedCount)
-{
-    /// <summary>このバッチで実際に処理対象となった件数</summary>
-    public int ProcessedCount => CachedCount + ClearedCount + FailedCount;
-}
+    int FailedCount);
