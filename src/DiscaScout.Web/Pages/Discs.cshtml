@@ -161,7 +161,12 @@
 <script>
     const size = document.getElementById('page-size');
     const saved = localStorage.getItem('discascout-page-size');
-    if (saved && !location.search.includes('size=')) size.value = saved;
+    const url = new URL(location.href);
+    if (saved && ['50', '100', '200'].includes(saved) && !url.searchParams.has('size')) {
+        // 表示件数はサーバー側ページングにも影響するため、選択欄だけを書き換えずURLへ反映して再取得する。
+        url.searchParams.set('size', saved);
+        location.replace(url.toString());
+    }
     size.addEventListener('change', () => localStorage.setItem('discascout-page-size', size.value));
 </script>
 </body>
