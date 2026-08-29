@@ -48,12 +48,7 @@ public sealed class ScrapeRunCoordinator(
     /// <summary>
     /// 期限到来済みのリトライ予定を1件実行する
     /// </summary>
-    /// <param name="retry">実行するPending状態のリトライ予定</param>
-    /// <param name="cancellationToken">実行を中断するためのトークン</param>
-    /// <returns>対象カテゴリの実行結果</returns>
-    public Task<CategoryScrapeResult> ExecuteRetryAsync(
-        ScrapeRetry retry,
-        CancellationToken cancellationToken = default)
+    public Task<CategoryScrapeResult> ExecuteRetryAsync(ScrapeRetry retry, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(retry);
         if (retry.Status != ScrapeRetryStatus.Pending)
@@ -61,11 +56,7 @@ public sealed class ScrapeRunCoordinator(
             throw new ArgumentException("Pendingではないリトライ予定は実行できない", nameof(retry));
         }
 
-        return ExecuteAndRecordAsync(
-            MapCategory(retry.Category),
-            ScrapeExecutionType.Retry,
-            retry,
-            cancellationToken);
+        return ExecuteAndRecordAsync(MapCategory(retry.Category), ScrapeExecutionType.Retry, retry, cancellationToken);
     }
 
     private async Task<CategoryScrapeResult> ExecuteAndRecordAsync(
@@ -80,8 +71,6 @@ public sealed class ScrapeRunCoordinator(
         var startedAt = startedAtOffset.UtcDateTime;
         var completedAt = completedAtOffset.UtcDateTime;
 
-        // SQLiteではDateTimeOffsetの比較・ORDER BYに制約があるため、永続タイムスタンプはUTC DateTimeで統一する。
-        // TimeProvider自体はDateTimeOffsetを返すので、永続化境界へ渡す直前にUTC DateTimeへ変換する。
         var run = new ScrapeRun
         {
             ExecutionType = executionType,
@@ -90,8 +79,6 @@ public sealed class ScrapeRunCoordinator(
             CompletedAt = completedAt,
             DurationMilliseconds = Math.Max(0, (long)(completedAtOffset - startedAtOffset).TotalMilliseconds),
             IsSuccess = result.IsSuccess,
-            // 現在のCrawlerは完全なSnapshotが完成した時点でのみ件数を返すため、成功時は取得件数と解析件数が一致する。
-            // 途中失敗時のページ単位件数はまだ公開していないので、誤った推定値を保存せずnullにする。
             FetchedCount = result.TotalCount,
             ParsedCount = result.TotalCount,
             AddedCount = result.AddedCount,
@@ -104,49 +91,36 @@ public sealed class ScrapeRunCoordinator(
 
         if (retry is not null)
         {
-            // 実行済み予定を先に消費済みにすることで、失敗後に次段のRetryを登録しても
-            // 同じ予定が再度期限到来として取得されないようにする。
+            // 実行済み予定を先に消費済みにしてから次段のRetryを登録する。
             await operationsStore.CompleteRetryAsync(retry.Id, completedAt, cancellationToken);
         }
 
         if (result.IsSuccess)
         {
-            // 定期・手動・Retryのいずれであっても最新実行が成功したなら、古い失敗を理由にした再試行は不要になる。
             await operationsStore.CancelPendingRetriesAsync(MapCategory(category), completedAt, cancellationToken);
-            return result;
+            return result with { NextRetryAt = null };
         }
 
+        DateTime? nextRetryAt = null;
         if (executionType != ScrapeExecutionType.Retry)
         {
-            await operationsStore.EnsureRetryAsync(
-                MapCategory(category),
-                attemptNumber: 1,
-                dueAt: completedAt.AddHours(3),
-                now: completedAt,
-                cancellationToken);
+            nextRetryAt = completedAt.AddHours(3);
+            await operationsStore.EnsureRetryAsync(MapCategory(category), 1, nextRetryAt.Value, completedAt, cancellationToken);
         }
         else if (retry!.AttemptNumber == 1)
         {
-            // 3時間後の再試行にも失敗した場合だけ、翌日に最終試行を1回設ける。
-            // 2回目まで失敗した後は連続アクセスを続けず、次回の通常実行に回復判定を委ねる。
-            await operationsStore.EnsureRetryAsync(
-                MapCategory(category),
-                attemptNumber: 2,
-                dueAt: completedAt.AddDays(1),
-                now: completedAt,
-                cancellationToken);
+            // 3時間後の再試行にも失敗した場合だけ翌日に最終試行を1回設ける。
+            nextRetryAt = completedAt.AddDays(1);
+            await operationsStore.EnsureRetryAsync(MapCategory(category), 2, nextRetryAt.Value, completedAt, cancellationToken);
         }
 
-        return result;
+        // 通知側がDBを再検索せず、実際にこの実行で登録した次回Retry日時を表示できるよう結果へ含める。
+        return result with { NextRetryAt = nextRetryAt };
     }
 
     private static string? TruncateFailureReason(string? message)
     {
-        if (string.IsNullOrWhiteSpace(message))
-        {
-            return null;
-        }
-
+        if (string.IsNullOrWhiteSpace(message)) return null;
         const int maxLength = 1000;
         return message.Length <= maxLength ? message : message[..maxLength];
     }
