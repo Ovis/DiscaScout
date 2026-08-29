@@ -25,7 +25,7 @@
         label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 650; }
         input[type=text], select { padding: 8px; border: 1px solid #c9ced6; border-radius: 6px; background: white; }
         input[type=text] { width: 230px; }
-        select.genre { min-width: 180px; }
+        select.genre { min-width: 220px; }
         button { border: 0; border-radius: 6px; padding: 8px 12px; background: #273142; color: white; font-weight: 650; cursor: pointer; }
         button.secondary { background: #5f6b7a; }
         button.rented { background: #7b3fa1; }
@@ -91,9 +91,19 @@
         <label>ジャンル
             <select class="genre" name="genre">
                 <option value="">すべて</option>
-                @foreach (var genre in Model.GenreOptions)
+                @foreach (var largeGenre in Model.GenreGroups)
                 {
-                    <option value="@genre" selected="@(Model.Genre == genre)">@genre</option>
+                    <optgroup label="@largeGenre.Name">
+                        <option value="@largeGenre.Name" selected="@(Model.Genre == largeGenre.Name)">@largeGenre.Name（すべて）</option>
+                        @foreach (var middleGenre in largeGenre.MiddleGenres)
+                        {
+                            <option value="@middleGenre.Name" selected="@(Model.Genre == middleGenre.Name)">　├ @middleGenre.Name</option>
+                            @foreach (var smallGenre in middleGenre.SmallGenres)
+                            {
+                                <option value="@smallGenre" selected="@(Model.Genre == smallGenre)">　│　└ @smallGenre</option>
+                            }
+                        }
+                    </optgroup>
                 }
             </select>
         </label>
