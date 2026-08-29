@@ -4,41 +4,69 @@ using System.Text;
 namespace DiscaScout.Scraping;
 
 /// <summary>
-/// すべてのDISCAS HTTPアクセスで共有するリクエスト間隔と排他制御を提供する
+/// すべてのDISCAS検索ページHTTPアクセスで共有するリクエスト間隔と排他制御を提供する
 /// </summary>
 public sealed class DiscasRequestThrottle
 {
     private static readonly TimeSpan DefaultMinimumRequestInterval = TimeSpan.FromSeconds(2);
+    private const int DefaultBurstSize = 10;
 
     private readonly TimeSpan minimumRequestInterval;
+    private readonly int burstSize;
+    private readonly Func<TimeSpan> burstPauseFactory;
     private readonly SemaphoreSlim requestGate = new(1, 1);
     private DateTimeOffset? lastRequestStartedAt;
+    private int requestsSinceBurstPause;
 
     /// <summary>
-    /// 本番用の最低2秒間隔でスロットルを初期化する
+    /// 本番用の最低2秒間隔と10ページごとの追加休止でスロットルを初期化する
     /// </summary>
     public DiscasRequestThrottle()
-        : this(DefaultMinimumRequestInterval)
+        : this(
+            DefaultMinimumRequestInterval,
+            DefaultBurstSize,
+            static () => TimeSpan.FromSeconds(Random.Shared.Next(5, 21)))
     {
     }
 
     /// <summary>
-    /// テスト用にリクエスト開始時刻の最低間隔を指定して初期化する
+    /// テスト用にリクエスト開始間隔だけを指定して初期化する
     /// </summary>
     /// <param name="minimumRequestInterval">リクエスト開始時刻の最低間隔</param>
     internal DiscasRequestThrottle(TimeSpan minimumRequestInterval)
+        : this(minimumRequestInterval, int.MaxValue, static () => TimeSpan.Zero)
+    {
+    }
+
+    /// <summary>
+    /// テスト用に通常間隔、連続取得数、追加休止時間を指定して初期化する
+    /// </summary>
+    internal DiscasRequestThrottle(
+        TimeSpan minimumRequestInterval,
+        int burstSize,
+        Func<TimeSpan> burstPauseFactory)
     {
         if (minimumRequestInterval < TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(nameof(minimumRequestInterval));
         }
+        if (burstSize <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(burstSize));
+        }
 
         this.minimumRequestInterval = minimumRequestInterval;
+        this.burstSize = burstSize;
+        this.burstPauseFactory = burstPauseFactory ?? throw new ArgumentNullException(nameof(burstPauseFactory));
     }
 
     /// <summary>
-    /// 次のDISCASリクエストを開始できるまで待機し、排他スロットを取得する
+    /// 次のDISCAS検索ページを開始できるまで待機し、排他スロットを取得する
     /// </summary>
+    /// <remarks>
+    /// 検索ページは常に直列化し開始時刻を最低2秒空ける。さらに10ページ連続で取得した後は
+    /// 5～20秒の追加休止を入れ、機械的な定間隔アクセスが長時間継続しないようにする。
+    /// </remarks>
     /// <param name="cancellationToken">待機を中断するためのトークン</param>
     /// <returns>HTTPレスポンス処理完了時に破棄する排他スロット</returns>
     public async Task<IDisposable> AcquireAsync(CancellationToken cancellationToken = default)
@@ -46,6 +74,16 @@ public sealed class DiscasRequestThrottle
         await requestGate.WaitAsync(cancellationToken);
         try
         {
+            if (requestsSinceBurstPause >= burstSize)
+            {
+                var burstPause = burstPauseFactory();
+                if (burstPause > TimeSpan.Zero)
+                {
+                    await Task.Delay(burstPause, cancellationToken);
+                }
+                requestsSinceBurstPause = 0;
+            }
+
             if (lastRequestStartedAt is not null && minimumRequestInterval > TimeSpan.Zero)
             {
                 var elapsed = DateTimeOffset.UtcNow - lastRequestStartedAt.Value;
@@ -57,6 +95,7 @@ public sealed class DiscasRequestThrottle
             }
 
             lastRequestStartedAt = DateTimeOffset.UtcNow;
+            requestsSinceBurstPause++;
             return new Releaser(requestGate);
         }
         catch
@@ -92,17 +131,12 @@ public sealed class DiscasPageFetcher
 
     static DiscasPageFetcher()
     {
-        // DISCASはShift_JIS系の文字コードを使用しているため、コードページ932を利用できるようにする。
-        // .NETでは既定でコードページ系Encodingが有効ではないので、ライブラリ側で登録して
-        // 呼び出し元の初期化方法に依存しないようにする。
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
     }
 
     /// <summary>
     /// DISCASページ取得クライアントを初期化する
     /// </summary>
-    /// <param name="httpClient">HTTP通信に使用するクライアント</param>
-    /// <param name="requestThrottle">アプリ全体で共有するDISCASアクセス制御</param>
     public DiscasPageFetcher(HttpClient httpClient, DiscasRequestThrottle requestThrottle)
     {
         ArgumentNullException.ThrowIfNull(httpClient);
@@ -114,8 +148,6 @@ public sealed class DiscasPageFetcher
     /// <summary>
     /// テスト用にリクエスト間隔を指定してDISCASページ取得クライアントを初期化する
     /// </summary>
-    /// <param name="httpClient">HTTP通信に使用するクライアント</param>
-    /// <param name="minimumRequestInterval">リクエスト開始時刻の最低間隔</param>
     internal DiscasPageFetcher(HttpClient httpClient, TimeSpan minimumRequestInterval)
         : this(httpClient, new DiscasRequestThrottle(minimumRequestInterval))
     {
@@ -124,21 +156,15 @@ public sealed class DiscasPageFetcher
     /// <summary>
     /// 指定されたDISCASページを取得する
     /// </summary>
-    /// <param name="uri">取得対象の絶対URL</param>
-    /// <param name="cancellationToken">取得処理を中断するためのトークン</param>
-    /// <returns>HTTPステータス、最終URL、文字コード、HTML本文を含む取得結果</returns>
     public async Task<FetchResult> FetchAsync(Uri uri, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(uri);
 
-        // CrawlerごとにFetcherインスタンスが分かれてもDISCASへの並列アクセスが発生しないよう、
+        // CategoryとArtist Catalogが同時に動いても検索ページを並列取得しないため、
         // アプリ全体で共有するThrottleをレスポンス本文の読み取り完了まで保持する。
         using var requestSlot = await requestThrottle.AcquireAsync(cancellationToken);
 
         using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-
-        // DISCAS側に通常のデスクトップブラウザからのアクセスと同等のUser-Agentを送る。
-        // 独自CrawlerのUser-Agentによって通常ブラウザと異なるレスポンスになる可能性を避けるため固定している。
         request.Headers.UserAgent.ParseAdd(ChromeUserAgent);
         request.Headers.AcceptLanguage.ParseAdd("ja-JP,ja;q=0.9,en;q=0.5");
 
@@ -148,10 +174,6 @@ public sealed class DiscasPageFetcher
             cancellationToken);
 
         var charset = response.Content.Headers.ContentType?.CharSet;
-
-        // ReadAsStringAsyncはContent-TypeのcharsetをそのままEncoding.GetEncodingへ渡すため、
-        // DISCASが返す「Windows-31J」のような.NETで認識されない別名が含まれると例外になる。
-        // そのため本文はバイト列で取得し、DISCAS固有のcharset表記をこちらでCP932へ正規化してからデコードする。
         var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
         var encoding = ResolveEncoding(charset);
         var html = encoding.GetString(bytes);
@@ -166,21 +188,14 @@ public sealed class DiscasPageFetcher
     /// <summary>
     /// HTTPレスポンスのcharset表記から.NETで利用可能な文字コードを解決する
     /// </summary>
-    /// <param name="charset">Content-Typeヘッダーで指定されたcharset。未指定の場合はnull</param>
-    /// <returns>HTML本文のデコードに使用する文字コード</returns>
     internal static Encoding ResolveEncoding(string? charset)
     {
         if (string.IsNullOrWhiteSpace(charset))
         {
-            // HTTPヘッダーに指定がない場合は、現在のDISCAS検索ページで一般的なCP932を既定値とする。
-            // 将来UTF-8へ移行した場合は、実レスポンスの確認結果に合わせて判定方法を見直す。
             return Encoding.GetEncoding(932);
         }
 
         var normalizedCharset = charset.Trim().Trim('"');
-
-        // Windows-31JはCP932（Windows版Shift_JIS）を指す表記としてDISCASが使用しているが、
-        // CodePagesEncodingProviderを登録してもこの別名自体は.NETで解決できないため明示的に対応する。
         if (normalizedCharset.Equals("Windows-31J", StringComparison.OrdinalIgnoreCase))
         {
             return Encoding.GetEncoding(932);
@@ -193,10 +208,6 @@ public sealed class DiscasPageFetcher
 /// <summary>
 /// DISCASページのHTTP取得結果を保持する
 /// </summary>
-/// <param name="StatusCode">HTTPステータスコード</param>
-/// <param name="FinalUri">リダイレクト後の最終URL</param>
-/// <param name="Charset">レスポンスで指定された文字コード</param>
-/// <param name="Html">デコード済みHTML本文</param>
 public sealed record FetchResult(
     HttpStatusCode StatusCode,
     Uri FinalUri,
