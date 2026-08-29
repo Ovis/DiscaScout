@@ -74,17 +74,21 @@ public sealed class ScrapeRunCoordinator(
         ScrapeRetry? retry,
         CancellationToken cancellationToken)
     {
-        var startedAt = clock.GetUtcNow();
+        var startedAtOffset = clock.GetUtcNow();
         var result = await scrapeService.ExecuteCategoryAsync(category, cancellationToken);
-        var completedAt = clock.GetUtcNow();
+        var completedAtOffset = clock.GetUtcNow();
+        var startedAt = startedAtOffset.UtcDateTime;
+        var completedAt = completedAtOffset.UtcDateTime;
 
+        // SQLiteではDateTimeOffsetの比較・ORDER BYに制約があるため、永続タイムスタンプはUTC DateTimeで統一する。
+        // TimeProvider自体はDateTimeOffsetを返すので、永続化境界へ渡す直前にUTC DateTimeへ変換する。
         var run = new ScrapeRun
         {
             ExecutionType = executionType,
             Category = MapCategory(category),
             StartedAt = startedAt,
             CompletedAt = completedAt,
-            DurationMilliseconds = Math.Max(0, (long)(completedAt - startedAt).TotalMilliseconds),
+            DurationMilliseconds = Math.Max(0, (long)(completedAtOffset - startedAtOffset).TotalMilliseconds),
             IsSuccess = result.IsSuccess,
             // 現在のCrawlerは完全なSnapshotが完成した時点でのみ件数を返すため、成功時は取得件数と解析件数が一致する。
             // 途中失敗時のページ単位件数はまだ公開していないので、誤った推定値を保存せずnullにする。
