@@ -23,7 +23,8 @@ public sealed class DiscasSnapshotApplier(DiscaScoutDbContext dbContext, TimePro
     {
         ArgumentNullException.ThrowIfNull(snapshot);
 
-        var now = clock.GetUtcNow();
+        // 永続タイムスタンプはSQLiteで比較・ソート可能なUTC DateTimeへ統一する。
+        var now = clock.GetUtcNow().UtcDateTime;
         var category = MapCategory(snapshot.Category);
 
         // カテゴリ単位の完全スナップショットとして反映するため、途中で失敗した場合は
@@ -143,9 +144,9 @@ public sealed class DiscasSnapshotApplier(DiscaScoutDbContext dbContext, TimePro
         return new SnapshotApplyResult(added, updated, deactivated);
     }
 
-    private static Disc CreateDisc(ScrapedDisc scraped, DateTimeOffset now)
+    private static Disc CreateDisc(ScrapedDisc scraped, DateTime now)
     {
-        var disc = new Disc
+        return new Disc
         {
             DiscasId = scraped.DiscasId,
             ProductUrl = scraped.ProductUrl,
@@ -163,11 +164,9 @@ public sealed class DiscasSnapshotApplier(DiscaScoutDbContext dbContext, TimePro
             LastUpdatedAt = now,
             NeedsReview = true
         };
-
-        return disc;
     }
 
-    private static DiscSource CreateSource(DiscReleaseCategory category, int sourceRank, DateTimeOffset now)
+    private static DiscSource CreateSource(DiscReleaseCategory category, int sourceRank, DateTime now)
     {
         return new DiscSource
         {
@@ -179,7 +178,7 @@ public sealed class DiscasSnapshotApplier(DiscaScoutDbContext dbContext, TimePro
         };
     }
 
-    private static bool ApplyMetadata(Disc disc, ScrapedDisc scraped, DateTimeOffset now)
+    private static bool ApplyMetadata(Disc disc, ScrapedDisc scraped, DateTime now)
     {
         var changed = false;
         var normalizedTitle = DiscTextNormalizer.Normalize(scraped.Title);
@@ -233,7 +232,7 @@ public sealed class DiscasSnapshotApplier(DiscaScoutDbContext dbContext, TimePro
         return true;
     }
 
-    private static void AddReviewReason(Disc disc, DiscReviewReasonType reason, DateTimeOffset now)
+    private static void AddReviewReason(Disc disc, DiscReviewReasonType reason, DateTime now)
     {
         if (disc.ReviewReasons.Any(x => x.Reason == reason))
         {
@@ -247,7 +246,7 @@ public sealed class DiscasSnapshotApplier(DiscaScoutDbContext dbContext, TimePro
         });
     }
 
-    private static void AddHistory(Disc disc, string field, string? oldValue, string? newValue, DateTimeOffset now)
+    private static void AddHistory(Disc disc, string field, string? oldValue, string? newValue, DateTime now)
     {
         disc.ChangeHistory.Add(new DiscChangeHistory
         {
