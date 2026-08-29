@@ -11,9 +11,6 @@ namespace DiscaScout.Scraping.Tests;
 /// </summary>
 public sealed class DiscasPageFetcherTests
 {
-    /// <summary>
-    /// DISCASがcharsetとしてWindows-31Jを返してもCP932として正常にデコードできることを確認する
-    /// </summary>
     [Fact]
     public async Task FetchAsync_Windows31JResponse_DecodesAsCodePage932()
     {
@@ -21,16 +18,9 @@ public sealed class DiscasPageFetcherTests
 
         const string expectedHtml = "<html><body>新作CD</body></html>";
         var content = new ByteArrayContent(Encoding.GetEncoding(932).GetBytes(expectedHtml));
-        content.Headers.ContentType = new MediaTypeHeaderValue("text/html")
-        {
-            CharSet = "Windows-31J"
-        };
+        content.Headers.ContentType = new MediaTypeHeaderValue("text/html") { CharSet = "Windows-31J" };
 
-        using var handler = new StubHttpMessageHandler(
-            new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = content
-            });
+        using var handler = new StubHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
         using var httpClient = new HttpClient(handler);
         var fetcher = new DiscasPageFetcher(httpClient, TimeSpan.Zero);
 
@@ -40,9 +30,6 @@ public sealed class DiscasPageFetcherTests
         Assert.Equal(expectedHtml, result.Html);
     }
 
-    /// <summary>
-    /// 複数の取得要求が同時に来てもDISCASへのHTTP要求が並列化されず、開始間隔も維持されることを確認する
-    /// </summary>
     [Fact]
     public async Task FetchAsync_ConcurrentRequests_AreSerializedAndThrottled()
     {
@@ -55,17 +42,11 @@ public sealed class DiscasPageFetcherTests
             fetcher.FetchAsync(new Uri("https://example.test/search?pn=2")));
 
         Assert.Equal(1, handler.MaximumConcurrentRequests);
-        Assert.Equal(2, handler.StartedAt.Count);
-
         var starts = handler.StartedAt.Order().ToArray();
-        Assert.True(
-            starts[1] - starts[0] >= TimeSpan.FromMilliseconds(80),
-            $"リクエスト開始間隔が短すぎる: {starts[1] - starts[0]}");
+        Assert.Equal(2, starts.Length);
+        Assert.True(starts[1] - starts[0] >= TimeSpan.FromMilliseconds(80));
     }
 
-    /// <summary>
-    /// CategoryとArtistでFetcherが別インスタンスでも共有Throttleにより同時HTTPアクセスしないことを確認する
-    /// </summary>
     [Fact]
     public async Task FetchAsync_DifferentFetcherInstances_SharedThrottleSerializesRequests()
     {
@@ -88,35 +69,45 @@ public sealed class DiscasPageFetcherTests
         handler.Dispose();
     }
 
-    /// <summary>
-    /// 外部通信を行わず、指定したHTTPレスポンスを取得クラスへ返すテスト用ハンドラー
-    /// </summary>
+    [Fact]
+    public async Task AcquireAsync_BurstSize到達後は次要求前に追加休止する()
+    {
+        var pauseCount = 0;
+        var throttle = new DiscasRequestThrottle(
+            TimeSpan.Zero,
+            burstSize: 2,
+            () =>
+            {
+                pauseCount++;
+                return TimeSpan.FromMilliseconds(80);
+            });
+
+        using (await throttle.AcquireAsync()) { }
+        using (await throttle.AcquireAsync()) { }
+        var startedAt = DateTimeOffset.UtcNow;
+        using (await throttle.AcquireAsync()) { }
+
+        Assert.Equal(1, pauseCount);
+        Assert.True(DateTimeOffset.UtcNow - startedAt >= TimeSpan.FromMilliseconds(60));
+    }
+
     private sealed class StubHttpMessageHandler(HttpResponseMessage response) : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(
-            HttpRequestMessage request,
-            CancellationToken cancellationToken)
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             response.RequestMessage = request;
             return Task.FromResult(response);
         }
     }
 
-    /// <summary>
-    /// HTTP要求の開始時刻と同時実行数を記録するテスト用ハンドラー
-    /// </summary>
     private sealed class RecordingHttpMessageHandler : HttpMessageHandler
     {
         private int activeRequests;
         private int maximumConcurrentRequests;
-
         internal ConcurrentBag<DateTimeOffset> StartedAt { get; } = [];
-
         internal int MaximumConcurrentRequests => maximumConcurrentRequests;
 
-        protected override async Task<HttpResponseMessage> SendAsync(
-            HttpRequestMessage request,
-            CancellationToken cancellationToken)
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var current = Interlocked.Increment(ref activeRequests);
             UpdateMaximum(current);
@@ -124,7 +115,6 @@ public sealed class DiscasPageFetcherTests
 
             try
             {
-                // Fetcherがレスポンス完了まで排他を保持していることを検証できるよう、短時間だけ要求を継続させる。
                 await Task.Delay(30, cancellationToken);
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {

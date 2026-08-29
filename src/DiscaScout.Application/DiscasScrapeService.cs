@@ -8,8 +8,7 @@ namespace DiscaScout.Application;
 /// </summary>
 public sealed class DiscasScrapeService(
     IDiscasCategoryCrawler crawler,
-    IDiscasSnapshotStore snapshotStore,
-    DiscImageCacheService? imageCache = null)
+    IDiscasSnapshotStore snapshotStore)
 {
     private static readonly DiscSourceCategory[] DefaultCategories =
     [
@@ -20,8 +19,6 @@ public sealed class DiscasScrapeService(
     /// <summary>
     /// 通常対象の近日リリース・新作を順番に取得して永続化する
     /// </summary>
-    /// <param name="cancellationToken">実行全体を中断するためのトークン</param>
-    /// <returns>カテゴリごとの成功・失敗と反映件数を含む実行結果</returns>
     public async Task<ScrapeExecutionResult> ExecuteAsync(CancellationToken cancellationToken = default)
     {
         var results = new List<CategoryScrapeResult>(DefaultCategories.Length);
@@ -38,24 +35,20 @@ public sealed class DiscasScrapeService(
     /// <summary>
     /// 指定した1カテゴリだけを取得して永続化する
     /// </summary>
-    /// <param name="category">取得対象カテゴリ</param>
-    /// <param name="cancellationToken">実行を中断するためのトークン</param>
-    /// <returns>カテゴリ単位の実行結果</returns>
     public async Task<CategoryScrapeResult> ExecuteCategoryAsync(
         DiscSourceCategory category,
         CancellationToken cancellationToken = default)
     {
         try
         {
-            // Crawlerはカテゴリ全ページの整合性確認が完了した場合だけSnapshotを返す。
-            // そのため永続化はCrawl完了後にのみ行い、途中まで取得できたデータをDBへ反映しない。
+            // 画像取得は専用BackgroundServiceへ分離しているため、検索結果の完全スナップショットを
+            // SQLiteへ反映した時点でカテゴリ取得は完了とする。
             var snapshot = await crawler.CrawlAsync(
                 category,
                 onPageFetched: null,
                 cancellationToken);
 
             var applyResult = await snapshotStore.ApplyAsync(snapshot, cancellationToken);
-            await TrySyncImagesAsync(snapshot.Products.Select(x => x.DiscasId), cancellationToken);
 
             return CategoryScrapeResult.Success(
                 category,
@@ -65,37 +58,11 @@ public sealed class DiscasScrapeService(
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // 明示的な停止要求は障害として記録せず、上位のBackgroundService等へそのまま伝える。
             throw;
         }
         catch (Exception ex)
         {
-            // NewとUpcomingは独立したコミット単位であるため、片方の失敗で他方まで中止しない。
-            // 詳細な例外情報は後続のログ基盤へ流し、実行結果には利用者向けの短い理由だけ保持する。
             return CategoryScrapeResult.Failure(category, ex.Message);
-        }
-    }
-
-    private async Task TrySyncImagesAsync(IEnumerable<string> discasIds, CancellationToken cancellationToken)
-    {
-        if (imageCache is null)
-        {
-            return;
-        }
-
-        try
-        {
-            // 画像はカテゴリスナップショットとは独立した副次データなので、DB反映後に同期する。
-            // 保存先障害など画像同期全体が失敗しても、既に確定した正常なカテゴリ取得を失敗扱いにしない。
-            await imageCache.SyncAsync(discasIds, cancellationToken);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch
-        {
-            // 画像同期は次回実行で再試行できる。ScrapeRunの成否はDISCAS検索結果とSQLite反映を基準にする。
         }
     }
 }
@@ -103,12 +70,8 @@ public sealed class DiscasScrapeService(
 /// <summary>
 /// 通常スクレイピング1回分のカテゴリ別結果を保持する
 /// </summary>
-/// <param name="Categories">実行したカテゴリの結果</param>
 public sealed record ScrapeExecutionResult(IReadOnlyList<CategoryScrapeResult> Categories)
 {
-    /// <summary>
-    /// 全カテゴリが正常終了したか
-    /// </summary>
     public bool IsSuccess => Categories.All(x => x.IsSuccess);
 }
 
@@ -117,37 +80,17 @@ public sealed record ScrapeExecutionResult(IReadOnlyList<CategoryScrapeResult> C
 /// </summary>
 public sealed record CategoryScrapeResult
 {
-    private CategoryScrapeResult()
-    {
-    }
+    private CategoryScrapeResult() { }
 
-    /// <summary>取得対象カテゴリ</summary>
     public required DiscSourceCategory Category { get; init; }
-
-    /// <summary>クロールと永続化の両方が成功したか</summary>
     public required bool IsSuccess { get; init; }
-
-    /// <summary>DISCASが報告したカテゴリ総件数。取得失敗時はnull</summary>
     public int? TotalCount { get; init; }
-
-    /// <summary>取得したページ数。取得失敗時はnull</summary>
     public int? PageCount { get; init; }
-
-    /// <summary>新規作成したCD数</summary>
     public int AddedCount { get; init; }
-
-    /// <summary>更新した既存CD数</summary>
     public int UpdatedCount { get; init; }
-
-    /// <summary>Inactiveへ移したカテゴリSource数</summary>
     public int DeactivatedSourceCount { get; init; }
-
-    /// <summary>失敗理由。成功時はnull</summary>
     public string? ErrorMessage { get; init; }
 
-    /// <summary>
-    /// 正常終了した結果を生成する
-    /// </summary>
     internal static CategoryScrapeResult Success(
         DiscSourceCategory category,
         int totalCount,
@@ -166,9 +109,6 @@ public sealed record CategoryScrapeResult
         };
     }
 
-    /// <summary>
-    /// 失敗した結果を生成する
-    /// </summary>
     internal static CategoryScrapeResult Failure(DiscSourceCategory category, string message)
     {
         return new CategoryScrapeResult
