@@ -24,12 +24,43 @@ public sealed class DiscasSnapshotApplierTests
             .Include(x => x.ReviewReasons)
             .SingleAsync();
         Assert.Equal(1, result.AddedCount);
+        Assert.Equal(0, result.ArtistWatchNewMatchCount);
         Assert.True(disc.NeedsReview);
         Assert.False(disc.IsArchived);
         Assert.Equal("作品1", disc.Title);
         Assert.Equal("J-POP", disc.GenreLarge);
         Assert.Contains(disc.ReviewReasons, x => x.Reason == DiscReviewReasonType.New);
         Assert.Contains(disc.Sources, x => x.Category == DiscReleaseCategory.New && x.IsActive);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_Watch対象CDが新たに一致した場合だけ新規一致件数へ含める()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        database.Context.ArtistSettings.Add(new ArtistSetting
+        {
+            Artist = "アーティスト1",
+            NormalizedArtist = DiscTextNormalizer.Normalize("アーティスト1"),
+            MatchType = ArtistMatchType.Exact,
+            IsWatchEnabled = true
+        });
+        await database.Context.SaveChangesAsync();
+
+        var applier = new DiscasSnapshotApplier(database.Context, new FixedTimeProvider(DateTimeOffset.UtcNow));
+        var snapshot = CreateSnapshot(("1001", "作品1", "アーティスト1"));
+
+        var firstResult = await applier.ApplyAsync(snapshot);
+        var secondResult = await applier.ApplyAsync(snapshot);
+
+        Assert.Equal(1, firstResult.ArtistWatchNewMatchCount);
+        Assert.Equal(0, secondResult.ArtistWatchNewMatchCount);
+
+        var disc = await database.Context.Discs
+            .Include(x => x.ReviewReasons)
+            .Include(x => x.ArtistMatches)
+            .SingleAsync();
+        Assert.Contains(disc.ReviewReasons, x => x.Reason == DiscReviewReasonType.ArtistMatched);
+        Assert.Single(disc.ArtistMatches, x => x.IsCurrentMatch);
     }
 
     [Fact]
@@ -47,6 +78,7 @@ public sealed class DiscasSnapshotApplierTests
             .Include(x => x.ChangeHistory)
             .SingleAsync();
         Assert.Equal(0, result.AddedCount);
+        Assert.Equal(0, result.ArtistWatchNewMatchCount);
         Assert.Single(disc.ReviewReasons);
         Assert.Empty(disc.ChangeHistory);
     }

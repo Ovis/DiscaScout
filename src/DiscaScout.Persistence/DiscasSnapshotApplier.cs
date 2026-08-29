@@ -47,6 +47,7 @@ public sealed class DiscasSnapshotApplier(DiscaScoutDbContext dbContext, TimePro
 
         var added = 0;
         var updated = 0;
+        var artistWatchNewMatches = 0;
 
         foreach (var scraped in snapshot.Products)
         {
@@ -58,6 +59,13 @@ public sealed class DiscasSnapshotApplier(DiscaScoutDbContext dbContext, TimePro
                 disc.Sources.Add(CreateSource(category, scraped.SourceRank, now));
                 AddReviewReason(disc, DiscReviewReasonType.New, now);
                 ArtistWatchService.ApplyCurrentMatches(disc, artistSettings, now);
+                if (HasArtistMatchedReason(disc))
+                {
+                    // 通知上の件数はWatch設定数ではなく、今回新たにARTIST_MATCHEDとなったCD数として数える。
+                    // 複数のWatch設定に同じCDが一致してもユーザーが確認するCDは1件なので重複計上しない。
+                    artistWatchNewMatches++;
+                }
+
                 dbContext.Discs.Add(disc);
                 discs.Add(disc);
                 byDiscasId.Add(disc.DiscasId, disc);
@@ -71,7 +79,12 @@ public sealed class DiscasSnapshotApplier(DiscaScoutDbContext dbContext, TimePro
 
             // Artist表記が変わった場合を含め、現在の正規化済みArtistに対してWatchを再評価する。
             // 継続一致では状態を変更しないため、週次クロールのたびにInboxが再オープンすることはない。
+            var hadArtistMatchedReason = HasArtistMatchedReason(disc);
             changed |= ArtistWatchService.ApplyCurrentMatches(disc, artistSettings, now);
+            if (!hadArtistMatchedReason && HasArtistMatchedReason(disc))
+            {
+                artistWatchNewMatches++;
+            }
 
             var source = disc.Sources.SingleOrDefault(x => x.Category == category);
             if (source is null)
@@ -159,7 +172,10 @@ public sealed class DiscasSnapshotApplier(DiscaScoutDbContext dbContext, TimePro
         await dbContext.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
-        return new SnapshotApplyResult(added, updated, deactivated);
+        return new SnapshotApplyResult(added, updated, deactivated)
+        {
+            ArtistWatchNewMatchCount = artistWatchNewMatches
+        };
     }
 
     private static Disc CreateDisc(ScrapedDisc scraped, DateTime now)
@@ -254,6 +270,11 @@ public sealed class DiscasSnapshotApplier(DiscaScoutDbContext dbContext, TimePro
         return true;
     }
 
+    private static bool HasArtistMatchedReason(Disc disc)
+    {
+        return disc.ReviewReasons.Any(x => x.Reason == DiscReviewReasonType.ArtistMatched);
+    }
+
     private static void AddReviewReason(Disc disc, DiscReviewReasonType reason, DateTime now)
     {
         if (disc.ReviewReasons.Any(x => x.Reason == reason))
@@ -306,4 +327,10 @@ public sealed class DiscasSnapshotApplier(DiscaScoutDbContext dbContext, TimePro
 /// <param name="AddedCount">新規作成したCD数</param>
 /// <param name="UpdatedCount">既存CDでメタデータまたはソース状態を更新した数</param>
 /// <param name="DeactivatedSourceCount">2回連続で消失しInactiveへ移したソース数</param>
-public sealed record SnapshotApplyResult(int AddedCount, int UpdatedCount, int DeactivatedSourceCount);
+public sealed record SnapshotApplyResult(int AddedCount, int UpdatedCount, int DeactivatedSourceCount)
+{
+    /// <summary>
+    /// 今回の通常スナップショット反映で新たにArtist Watchへ一致し、ARTIST_MATCHED理由が付与されたCD数
+    /// </summary>
+    public int ArtistWatchNewMatchCount { get; init; }
+}

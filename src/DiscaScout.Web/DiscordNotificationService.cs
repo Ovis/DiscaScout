@@ -22,7 +22,7 @@ public sealed class DiscordNotificationService(IHttpClientFactory httpClientFact
         string content;
         if (result.IsSuccess)
         {
-            content = $"DiscaScout: {execution} / {category} 成功\n取得 {result.TotalCount ?? 0}件 / {result.PageCount?.ToString() ?? "?"}ページ / 新規 {result.AddedCount}件 / 更新 {result.UpdatedCount}件";
+            content = $"DiscaScout: {execution} / {category} 成功\n取得 {result.TotalCount ?? 0}件 / {result.PageCount?.ToString() ?? "?"}ページ / 新規 {result.AddedCount}件 / 更新 {result.UpdatedCount}件 / Artist Watch新規一致 {result.ArtistWatchNewMatchCount}件";
             if (result.CountDropOverrideUsed)
             {
                 content += "\n確認済みの急減許可を使用してDBへ反映しました。";
