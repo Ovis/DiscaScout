@@ -25,7 +25,7 @@ internal static class MigrationModelBuilder
             b.Property<long>("Id").ValueGeneratedOnAdd().HasColumnType("INTEGER").HasAnnotation("Sqlite:Autoincrement", true);
             b.Property<string>("Artist").IsRequired().HasMaxLength(1000).HasColumnType("TEXT");
             b.Property<string>("DiscasId").IsRequired().HasMaxLength(32).HasColumnType("TEXT");
-            b.Property<DateTimeOffset>("FirstSeenAt").HasColumnType("TEXT");
+            b.Property<DateTime>("FirstSeenAt").HasColumnType("TEXT");
             b.Property<string>("GenreLarge").IsRequired().HasMaxLength(200).HasColumnType("TEXT");
             b.Property<string>("GenreMiddle").HasMaxLength(200).HasColumnType("TEXT");
             b.Property<string>("GenreSmall").HasMaxLength(200).HasColumnType("TEXT");
@@ -33,9 +33,9 @@ internal static class MigrationModelBuilder
             b.Property<string>("ImageUrl").HasMaxLength(2048).HasColumnType("TEXT");
             b.Property<bool>("IsArchived").HasColumnType("INTEGER");
             b.Property<bool>("IsRented").HasColumnType("INTEGER");
-            b.Property<DateTimeOffset?>("LastReviewedAt").HasColumnType("TEXT");
-            b.Property<DateTimeOffset>("LastSeenAt").HasColumnType("TEXT");
-            b.Property<DateTimeOffset>("LastUpdatedAt").HasColumnType("TEXT");
+            b.Property<DateTime?>("LastReviewedAt").HasColumnType("TEXT");
+            b.Property<DateTime>("LastSeenAt").HasColumnType("TEXT");
+            b.Property<DateTime>("LastUpdatedAt").HasColumnType("TEXT");
             b.Property<bool>("NeedsReview").HasColumnType("INTEGER");
             b.Property<string>("NormalizedArtist").IsRequired().HasMaxLength(1000).HasColumnType("TEXT");
             b.Property<string>("NormalizedTitle").IsRequired().HasMaxLength(1000).HasColumnType("TEXT");
@@ -56,7 +56,7 @@ internal static class MigrationModelBuilder
         modelBuilder.Entity("DiscaScout.Core.DiscChangeHistory", b =>
         {
             b.Property<long>("Id").ValueGeneratedOnAdd().HasColumnType("INTEGER").HasAnnotation("Sqlite:Autoincrement", true);
-            b.Property<DateTimeOffset>("ChangedAt").HasColumnType("TEXT");
+            b.Property<DateTime>("ChangedAt").HasColumnType("TEXT");
             b.Property<long>("DiscId").HasColumnType("INTEGER");
             b.Property<string>("Field").IsRequired().HasMaxLength(100).HasColumnType("TEXT");
             b.Property<string>("NewValue").HasColumnType("TEXT");
@@ -69,7 +69,7 @@ internal static class MigrationModelBuilder
         modelBuilder.Entity("DiscaScout.Core.DiscReviewReason", b =>
         {
             b.Property<long>("Id").ValueGeneratedOnAdd().HasColumnType("INTEGER").HasAnnotation("Sqlite:Autoincrement", true);
-            b.Property<DateTimeOffset>("CreatedAt").HasColumnType("TEXT");
+            b.Property<DateTime>("CreatedAt").HasColumnType("TEXT");
             b.Property<long>("DiscId").HasColumnType("INTEGER");
             b.Property<int>("Reason").HasColumnType("INTEGER");
             b.HasKey("Id");
@@ -83,7 +83,7 @@ internal static class MigrationModelBuilder
             b.Property<int>("Category").HasColumnType("INTEGER");
             b.Property<long>("DiscId").HasColumnType("INTEGER");
             b.Property<bool>("IsActive").HasColumnType("INTEGER");
-            b.Property<DateTimeOffset>("LastSeenAt").HasColumnType("TEXT");
+            b.Property<DateTime>("LastSeenAt").HasColumnType("TEXT");
             b.Property<int>("MissingCount").HasColumnType("INTEGER");
             b.Property<int>("SourceRank").HasColumnType("INTEGER");
             b.HasKey("Id");
@@ -97,9 +97,9 @@ internal static class MigrationModelBuilder
             b.Property<long>("Id").ValueGeneratedOnAdd().HasColumnType("INTEGER").HasAnnotation("Sqlite:Autoincrement", true);
             b.Property<int>("AttemptNumber").HasColumnType("INTEGER");
             b.Property<int>("Category").HasColumnType("INTEGER");
-            b.Property<DateTimeOffset>("CreatedAt").HasColumnType("TEXT");
-            b.Property<DateTimeOffset>("DueAt").HasColumnType("TEXT");
-            b.Property<DateTimeOffset?>("ResolvedAt").HasColumnType("TEXT");
+            b.Property<DateTime>("CreatedAt").HasColumnType("TEXT");
+            b.Property<DateTime>("DueAt").HasColumnType("TEXT");
+            b.Property<DateTime?>("ResolvedAt").HasColumnType("TEXT");
             b.Property<int>("Status").HasColumnType("INTEGER");
             b.HasKey("Id");
             b.HasIndex("Category", "Status");
@@ -112,7 +112,7 @@ internal static class MigrationModelBuilder
             b.Property<long>("Id").ValueGeneratedOnAdd().HasColumnType("INTEGER").HasAnnotation("Sqlite:Autoincrement", true);
             b.Property<int>("AddedCount").HasColumnType("INTEGER");
             b.Property<int>("Category").HasColumnType("INTEGER");
-            b.Property<DateTimeOffset>("CompletedAt").HasColumnType("TEXT");
+            b.Property<DateTime>("CompletedAt").HasColumnType("TEXT");
             b.Property<int>("DeactivatedSourceCount").HasColumnType("INTEGER");
             b.Property<long>("DurationMilliseconds").HasColumnType("INTEGER");
             b.Property<int>("ExecutionType").HasColumnType("INTEGER");
@@ -120,7 +120,7 @@ internal static class MigrationModelBuilder
             b.Property<int?>("FetchedCount").HasColumnType("INTEGER");
             b.Property<bool>("IsSuccess").HasColumnType("INTEGER");
             b.Property<int?>("ParsedCount").HasColumnType("INTEGER");
-            b.Property<DateTimeOffset>("StartedAt").HasColumnType("TEXT");
+            b.Property<DateTime>("StartedAt").HasColumnType("TEXT");
             b.Property<int>("UpdatedCount").HasColumnType("INTEGER");
             b.HasKey("Id");
             b.HasIndex("Category", "StartedAt");
