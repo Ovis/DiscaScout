@@ -1,6 +1,7 @@
 using DiscaScout.Application;
 using DiscaScout.Persistence;
 using DiscaScout.Scraping;
+using DiscaScout.Web;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
