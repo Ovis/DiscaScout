@@ -36,6 +36,7 @@ public sealed class DiscaScoutDbContext(DbContextOptions<DiscaScoutDbContext> op
         disc.HasIndex(x => x.NeedsReview); disc.HasIndex(x => x.IsArchived); disc.HasIndex(x => x.IsRented);
         disc.HasIndex(x => x.NormalizedTitle); disc.HasIndex(x => x.NormalizedArtist); disc.HasIndex(x => x.GenreLarge);
         disc.HasIndex(x => new { x.DetailRefreshCompleted, x.DetailFetchedAt });
+        disc.HasIndex(x => x.RentalHistoryImportedAt);
 
         var track = modelBuilder.Entity<DiscTrack>();
         track.HasKey(x => x.Id); track.Property(x => x.Title).HasMaxLength(1000); track.Property(x => x.Duration).HasMaxLength(100);
