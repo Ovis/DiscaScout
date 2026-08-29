@@ -31,7 +31,7 @@ public sealed class OperationsModel(
     /// <summary>最後に定期実行した日本時間の日付</summary>
     public DateOnly? LastScheduledExecutionDate { get; private set; }
 
-    /// <summary>直近の実行履歴</summary>
+    /// <summary>直近のスクレイピング実行履歴</summary>
     public IReadOnlyList<ScrapeRun> RecentRuns { get; private set; } = [];
 
     /// <summary>現在保留中のRetry</summary>
@@ -39,6 +39,9 @@ public sealed class OperationsModel(
 
     /// <summary>現在保留または実行中の手動処理</summary>
     public IReadOnlyList<ManualWorkItem> ActiveManualWork { get; private set; } = [];
+
+    /// <summary>直近の手動処理要求履歴</summary>
+    public IReadOnlyList<ManualWorkItem> RecentManualWork { get; private set; } = [];
 
     /// <summary>通常の手動取得が既に保留または実行中か</summary>
     public bool IsFullScrapeActive => ActiveManualWork.Any(x => x.Type == ManualWorkType.FullScrape);
@@ -141,6 +144,7 @@ public sealed class OperationsModel(
         RecentRuns = await operationsQueryStore.GetRecentRunsAsync(30, cancellationToken);
         PendingRetries = await operationsQueryStore.GetPendingRetriesAsync(cancellationToken);
         ActiveManualWork = await manualWorkStore.GetActiveAsync(cancellationToken);
+        RecentManualWork = await manualWorkStore.GetRecentAsync(20, cancellationToken);
 
         // 入力検証エラーで再表示する場合も最終実行日は設定ストアから取得し直す。
         var settings = await scheduleStore.GetAsync(cancellationToken);
