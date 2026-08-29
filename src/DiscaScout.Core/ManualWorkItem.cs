@@ -6,7 +6,8 @@ namespace DiscaScout.Core;
 public enum ManualWorkType
 {
     FullScrape = 1,
-    ArtistCatalog = 2
+    ArtistCatalog = 2,
+    CategoryScrape = 3
 }
 
 /// <summary>
@@ -33,6 +34,11 @@ public sealed class ManualWorkItem
     /// ArtistCatalog処理の場合に対象となるArtistSetting ID
     /// </summary>
     public long? ArtistSettingId { get; set; }
+
+    /// <summary>
+    /// CategoryScrape処理の場合に対象となる通常取得カテゴリ
+    /// </summary>
+    public ScrapeCategory? Category { get; set; }
 
     public DateTime RequestedAt { get; set; }
     public DateTime? StartedAt { get; set; }
