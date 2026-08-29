@@ -53,36 +53,24 @@ public sealed class DiscaScoutDbContext(DbContextOptions<DiscaScoutDbContext> op
         track.Property(x => x.Title).HasMaxLength(1000);
         track.Property(x => x.Duration).HasMaxLength(100);
         track.HasIndex(x => new { x.DiscId, x.TrackNumber }).IsUnique();
-        track.HasOne(x => x.Disc)
-            .WithMany(x => x.Tracks)
-            .HasForeignKey(x => x.DiscId)
-            .OnDelete(DeleteBehavior.Cascade);
+        track.HasOne(x => x.Disc).WithMany(x => x.Tracks).HasForeignKey(x => x.DiscId).OnDelete(DeleteBehavior.Cascade);
 
         var source = modelBuilder.Entity<DiscSource>();
         source.HasKey(x => x.Id);
         source.HasIndex(x => new { x.DiscId, x.Category }).IsUnique();
         source.HasIndex(x => new { x.Category, x.IsActive, x.SourceRank });
-        source.HasOne(x => x.Disc)
-            .WithMany(x => x.Sources)
-            .HasForeignKey(x => x.DiscId)
-            .OnDelete(DeleteBehavior.Cascade);
+        source.HasOne(x => x.Disc).WithMany(x => x.Sources).HasForeignKey(x => x.DiscId).OnDelete(DeleteBehavior.Cascade);
 
         var reviewReason = modelBuilder.Entity<DiscReviewReason>();
         reviewReason.HasKey(x => x.Id);
         reviewReason.HasIndex(x => new { x.DiscId, x.Reason }).IsUnique();
-        reviewReason.HasOne(x => x.Disc)
-            .WithMany(x => x.ReviewReasons)
-            .HasForeignKey(x => x.DiscId)
-            .OnDelete(DeleteBehavior.Cascade);
+        reviewReason.HasOne(x => x.Disc).WithMany(x => x.ReviewReasons).HasForeignKey(x => x.DiscId).OnDelete(DeleteBehavior.Cascade);
 
         var changeHistory = modelBuilder.Entity<DiscChangeHistory>();
         changeHistory.HasKey(x => x.Id);
         changeHistory.Property(x => x.Field).HasMaxLength(100);
         changeHistory.HasIndex(x => new { x.DiscId, x.ChangedAt });
-        changeHistory.HasOne(x => x.Disc)
-            .WithMany(x => x.ChangeHistory)
-            .HasForeignKey(x => x.DiscId)
-            .OnDelete(DeleteBehavior.Cascade);
+        changeHistory.HasOne(x => x.Disc).WithMany(x => x.ChangeHistory).HasForeignKey(x => x.DiscId).OnDelete(DeleteBehavior.Cascade);
 
         var artistSetting = modelBuilder.Entity<ArtistSetting>();
         artistSetting.HasKey(x => x.Id);
@@ -95,27 +83,15 @@ public sealed class DiscaScoutDbContext(DbContextOptions<DiscaScoutDbContext> op
         artistMatch.HasKey(x => x.Id);
         artistMatch.HasIndex(x => new { x.DiscId, x.ArtistSettingId }).IsUnique();
         artistMatch.HasIndex(x => new { x.ArtistSettingId, x.IsCurrentMatch });
-        artistMatch.HasOne(x => x.Disc)
-            .WithMany(x => x.ArtistMatches)
-            .HasForeignKey(x => x.DiscId)
-            .OnDelete(DeleteBehavior.Cascade);
-        artistMatch.HasOne(x => x.ArtistSetting)
-            .WithMany(x => x.DiscMatches)
-            .HasForeignKey(x => x.ArtistSettingId)
-            .OnDelete(DeleteBehavior.Cascade);
+        artistMatch.HasOne(x => x.Disc).WithMany(x => x.ArtistMatches).HasForeignKey(x => x.DiscId).OnDelete(DeleteBehavior.Cascade);
+        artistMatch.HasOne(x => x.ArtistSetting).WithMany(x => x.DiscMatches).HasForeignKey(x => x.ArtistSettingId).OnDelete(DeleteBehavior.Cascade);
 
         var artistCatalog = modelBuilder.Entity<DiscArtistCatalog>();
         artistCatalog.HasKey(x => x.Id);
         artistCatalog.HasIndex(x => new { x.DiscId, x.ArtistSettingId }).IsUnique();
         artistCatalog.HasIndex(x => new { x.ArtistSettingId, x.IsActive });
-        artistCatalog.HasOne(x => x.Disc)
-            .WithMany(x => x.ArtistCatalogEntries)
-            .HasForeignKey(x => x.DiscId)
-            .OnDelete(DeleteBehavior.Cascade);
-        artistCatalog.HasOne(x => x.ArtistSetting)
-            .WithMany(x => x.CatalogEntries)
-            .HasForeignKey(x => x.ArtistSettingId)
-            .OnDelete(DeleteBehavior.Cascade);
+        artistCatalog.HasOne(x => x.Disc).WithMany(x => x.ArtistCatalogEntries).HasForeignKey(x => x.DiscId).OnDelete(DeleteBehavior.Cascade);
+        artistCatalog.HasOne(x => x.ArtistSetting).WithMany(x => x.CatalogEntries).HasForeignKey(x => x.ArtistSettingId).OnDelete(DeleteBehavior.Cascade);
 
         var scrapeRun = modelBuilder.Entity<ScrapeRun>();
         scrapeRun.HasKey(x => x.Id);
