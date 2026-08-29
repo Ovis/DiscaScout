@@ -1,3 +1,4 @@
+using DiscaScout.Application;
 using DiscaScout.Persistence;
 using DiscaScout.Web.Models;
 using Microsoft.AspNetCore.Mvc;
@@ -12,7 +13,8 @@ public sealed class OperationsController(
     IScrapeScheduleStore scheduleStore,
     IScrapeOperationsQueryStore operationsQueryStore,
     ManualWorkStore manualWorkStore,
-    ManualWorkSignal manualWorkSignal) : Controller
+    ManualWorkSignal manualWorkSignal,
+    DiscDetailMetadataService detailMetadataService) : Controller
 {
     /// <summary>現在の設定と運用状態を表示する</summary>
     [HttpGet("")]
@@ -83,6 +85,7 @@ public sealed class OperationsController(
             PendingRetries = await operationsQueryStore.GetPendingRetriesAsync(cancellationToken),
             ActiveManualWork = await manualWorkStore.GetActiveAsync(cancellationToken),
             RecentManualWork = await manualWorkStore.GetRecentAsync(20, cancellationToken),
+            DetailFetchProgress = await detailMetadataService.GetProgressAsync(cancellationToken),
             StatusMessage = statusMessage
         };
     }

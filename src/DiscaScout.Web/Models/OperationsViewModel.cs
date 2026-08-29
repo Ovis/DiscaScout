@@ -1,3 +1,4 @@
+using DiscaScout.Application;
 using DiscaScout.Core;
 
 namespace DiscaScout.Web.Models;
@@ -17,6 +18,7 @@ public sealed class OperationsViewModel
     public IReadOnlyList<ScrapeRetry> PendingRetries { get; init; } = [];
     public IReadOnlyList<ManualWorkItem> ActiveManualWork { get; init; } = [];
     public IReadOnlyList<ManualWorkItem> RecentManualWork { get; init; } = [];
+    public required DiscDetailFetchProgress DetailFetchProgress { get; init; }
     public string? StatusMessage { get; init; }
     public bool IsFullScrapeActive => ActiveManualWork.Any(x => x.Type is ManualWorkType.FullScrape or ManualWorkType.CategoryScrape);
 
