@@ -1,6 +1,6 @@
 using DiscaScout.Scraping;
 
-const string defaultUrl = "https://movie-tsutaya.tsite.jp/netdvd/cd/searchCd.do?G=01013&PA=g_sk_&PN=1&SK=discas_music_new";
+const string defaultUrl = "https://movie-tsutaya.tsite.jp/netdvd/cd/searchCd.do?G=01013&PA=g_sk_&PN=1&SK=discas_music_new&SRT=5";
 
 var url = args.Length > 0 ? args[0] : defaultUrl;
 if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
@@ -42,9 +42,30 @@ Console.WriteLine($"Unique links: {analysis.UniqueLinkCount:N0}");
 Console.WriteLine($"Candidate product links: {analysis.ProductLinks.Count:N0}");
 Console.WriteLine($"Images: {analysis.ImageUris.Count:N0}");
 
-foreach (var productLink in analysis.ProductLinks.Take(10))
+var parser = new DiscasSearchResultParser();
+var searchPage = parser.Parse(result.Html, result.FinalUri, DiscSourceCategory.New);
+
+Console.WriteLine($"Parsed products: {searchPage.Products.Count:N0}");
+Console.WriteLine($"Reported total: {(searchPage.TotalCount is null ? "(unknown)" : searchPage.TotalCount.Value.ToString("N0"))}");
+Console.WriteLine($"Hidden title IDs: {searchPage.HiddenTitleIds.Count:N0}");
+
+var parsedIds = searchPage.Products.Select(product => product.DiscasId).ToHashSet(StringComparer.Ordinal);
+var hiddenIds = searchPage.HiddenTitleIds.ToHashSet(StringComparer.Ordinal);
+var idsMatch = hiddenIds.Count == 0 || parsedIds.SetEquals(hiddenIds);
+Console.WriteLine($"Product IDs match hidden IDs: {idsMatch}");
+
+foreach (var product in searchPage.Products.Take(10))
 {
-    Console.WriteLine($"Product: {productLink}");
+    Console.WriteLine($"#{product.SourceRank} [{product.DiscasId}] {product.Title} / {product.Artist}");
+    Console.WriteLine($"  URL: {product.ProductUrl}");
+    Console.WriteLine($"  Image: {product.ImageUrl ?? "(none)"}");
 }
 
-return result.StatusCode is >= System.Net.HttpStatusCode.OK and < System.Net.HttpStatusCode.MultipleChoices ? 0 : 1;
+if (result.StatusCode is < System.Net.HttpStatusCode.OK or >= System.Net.HttpStatusCode.MultipleChoices)
+{
+    return 1;
+}
+
+// hidden titleIdは実ページ内で同じ40商品を列挙しているため、ここが不一致ならDOM変更や解析漏れを疑う。
+// 本番クロールでも部分データを正常扱いしないための検証材料として利用する。
+return searchPage.Products.Count > 0 && idsMatch ? 0 : 3;
