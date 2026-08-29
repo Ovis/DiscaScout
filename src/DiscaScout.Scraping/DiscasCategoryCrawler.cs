@@ -3,9 +3,27 @@ using System.Net;
 namespace DiscaScout.Scraping;
 
 /// <summary>
+/// DISCASのリリースカテゴリ全体を取得する処理の契約
+/// </summary>
+public interface IDiscasCategoryCrawler
+{
+    /// <summary>
+    /// 指定カテゴリを先頭ページから最終ページまで取得する
+    /// </summary>
+    /// <param name="category">取得対象カテゴリ</param>
+    /// <param name="onPageFetched">HTTP取得直後、HTML解析前に呼び出す任意のコールバック</param>
+    /// <param name="cancellationToken">取得処理を中断するためのトークン</param>
+    /// <returns>カテゴリ全体の商品スナップショット</returns>
+    Task<DiscasCategorySnapshot> CrawlAsync(
+        DiscSourceCategory category,
+        Func<DiscasFetchedPage, CancellationToken, ValueTask>? onPageFetched = null,
+        CancellationToken cancellationToken = default);
+}
+
+/// <summary>
 /// DISCASのリリースカテゴリを全ページ取得し、カテゴリ単位で完全なスナップショットを生成する
 /// </summary>
-public sealed class DiscasCategoryCrawler
+public sealed class DiscasCategoryCrawler : IDiscasCategoryCrawler
 {
     private readonly DiscasPageFetcher pageFetcher;
     private readonly DiscasSearchResultParser parser;
@@ -21,14 +39,7 @@ public sealed class DiscasCategoryCrawler
         this.parser = parser;
     }
 
-    /// <summary>
-    /// 指定カテゴリを先頭ページから最終ページまで取得する
-    /// </summary>
-    /// <param name="category">取得対象カテゴリ</param>
-    /// <param name="onPageFetched">HTTP取得直後、HTML解析前に呼び出す任意のコールバック。PoCで生HTMLを保存する用途などに使用する</param>
-    /// <param name="cancellationToken">取得処理を中断するためのトークン</param>
-    /// <returns>カテゴリ全体の商品スナップショット</returns>
-    /// <exception cref="DiscasCategoryCrawlException">HTTP取得、解析、件数整合性の検証に失敗した場合</exception>
+    /// <inheritdoc />
     public async Task<DiscasCategorySnapshot> CrawlAsync(
         DiscSourceCategory category,
         Func<DiscasFetchedPage, CancellationToken, ValueTask>? onPageFetched = null,
@@ -55,18 +66,10 @@ public sealed class DiscasCategoryCrawler
 
         for (var pageNumber = 2; pageNumber <= pageCount; pageNumber++)
         {
-            var page = await FetchAndParsePageAsync(
-                category,
-                pageNumber,
-                products.Count,
-                onPageFetched,
-                cancellationToken);
-
+            var page = await FetchAndParsePageAsync(category, pageNumber, products.Count, onPageFetched, cancellationToken);
             if (page.TotalCount != totalCount)
             {
-                throw new DiscasCategoryCrawlException(
-                    category,
-                    $"ページ{pageNumber}の総件数が1ページ目と一致しない: first={totalCount}, current={page.TotalCount?.ToString() ?? "null"}");
+                throw new DiscasCategoryCrawlException(category, $"ページ{pageNumber}の総件数が1ページ目と一致しない: first={totalCount}, current={page.TotalCount?.ToString() ?? "null"}");
             }
 
             ValidatePageIds(category, pageNumber, page);
@@ -75,9 +78,7 @@ public sealed class DiscasCategoryCrawler
 
         if (products.Count != totalCount)
         {
-            throw new DiscasCategoryCrawlException(
-                category,
-                $"解析商品件数が検索結果の総件数と一致しない: expected={totalCount}, actual={products.Count}");
+            throw new DiscasCategoryCrawlException(category, $"解析商品件数が検索結果の総件数と一致しない: expected={totalCount}, actual={products.Count}");
         }
 
         var duplicateIds = products
@@ -89,9 +90,7 @@ public sealed class DiscasCategoryCrawler
 
         if (duplicateIds.Length > 0)
         {
-            throw new DiscasCategoryCrawlException(
-                category,
-                $"カテゴリ全体でtitleIDが重複している: {string.Join(", ", duplicateIds)}");
+            throw new DiscasCategoryCrawlException(category, $"カテゴリ全体でtitleIDが重複している: {string.Join(", ", duplicateIds)}");
         }
 
         return new DiscasCategorySnapshot(category, totalCount, pageCount, products);
@@ -111,16 +110,12 @@ public sealed class DiscasCategoryCrawler
         // 本番コードではコールバックを指定しなければ追加処理は発生しない。
         if (onPageFetched is not null)
         {
-            await onPageFetched(
-                new DiscasFetchedPage(category, pageNumber, fetchResult.FinalUri, fetchResult.Html),
-                cancellationToken);
+            await onPageFetched(new DiscasFetchedPage(category, pageNumber, fetchResult.FinalUri, fetchResult.Html), cancellationToken);
         }
 
         if (fetchResult.StatusCode is < HttpStatusCode.OK or >= HttpStatusCode.MultipleChoices)
         {
-            throw new DiscasCategoryCrawlException(
-                category,
-                $"ページ{pageNumber}の取得に失敗した: HTTP {(int)fetchResult.StatusCode} {fetchResult.StatusCode}");
+            throw new DiscasCategoryCrawlException(category, $"ページ{pageNumber}の取得に失敗した: HTTP {(int)fetchResult.StatusCode} {fetchResult.StatusCode}");
         }
 
         try
@@ -133,10 +128,7 @@ public sealed class DiscasCategoryCrawler
         }
     }
 
-    private static void ValidatePageIds(
-        DiscSourceCategory category,
-        int pageNumber,
-        DiscasSearchPage page)
+    private static void ValidatePageIds(DiscSourceCategory category, int pageNumber, DiscasSearchPage page)
     {
         if (page.Products.Count == 0)
         {
@@ -154,9 +146,7 @@ public sealed class DiscasCategoryCrawler
         // DOM selectorの変更で一部商品だけ取りこぼした場合を早期に検出するため完全一致を要求する。
         if (!parsedIds.SequenceEqual(page.HiddenTitleIds, StringComparer.Ordinal))
         {
-            throw new DiscasCategoryCrawlException(
-                category,
-                $"ページ{pageNumber}の商品titleIDとhidden titleIdが一致しない");
+            throw new DiscasCategoryCrawlException(category, $"ページ{pageNumber}の商品titleIDとhidden titleIdが一致しない");
         }
     }
 }
@@ -164,59 +154,24 @@ public sealed class DiscasCategoryCrawler
 /// <summary>
 /// HTTP取得直後、HTML解析前のDISCAS検索結果ページを保持する
 /// </summary>
-/// <param name="Category">取得対象カテゴリ</param>
-/// <param name="PageNumber">1始まりのページ番号</param>
-/// <param name="Uri">リダイレクト後の最終URL</param>
-/// <param name="Html">デコード済みHTML本文</param>
-public sealed record DiscasFetchedPage(
-    DiscSourceCategory Category,
-    int PageNumber,
-    Uri Uri,
-    string Html);
+public sealed record DiscasFetchedPage(DiscSourceCategory Category, int PageNumber, Uri Uri, string Html);
 
 /// <summary>
 /// 1回の正常なカテゴリクロールで得られた完全な商品一覧を保持する
 /// </summary>
-/// <param name="Category">取得対象カテゴリ</param>
-/// <param name="TotalCount">DISCASが示した検索結果総件数</param>
-/// <param name="PageCount">取得したページ数</param>
-/// <param name="Products">カテゴリ全体の商品一覧</param>
-public sealed record DiscasCategorySnapshot(
-    DiscSourceCategory Category,
-    int TotalCount,
-    int PageCount,
-    IReadOnlyList<ScrapedDisc> Products);
+public sealed record DiscasCategorySnapshot(DiscSourceCategory Category, int TotalCount, int PageCount, IReadOnlyList<ScrapedDisc> Products);
 
 /// <summary>
 /// DISCASカテゴリ全体を安全に取得できず、スナップショットとして利用できない場合に発生する例外
 /// </summary>
 public sealed class DiscasCategoryCrawlException : Exception
 {
-    /// <summary>
-    /// クロール失敗理由を指定して例外を初期化する
-    /// </summary>
-    /// <param name="category">失敗したカテゴリ</param>
-    /// <param name="message">失敗理由</param>
-    public DiscasCategoryCrawlException(DiscSourceCategory category, string message)
-        : base(message)
-    {
-        Category = category;
-    }
+    /// <summary>解析失敗理由を指定して例外を初期化する</summary>
+    public DiscasCategoryCrawlException(DiscSourceCategory category, string message) : base(message) => Category = category;
 
-    /// <summary>
-    /// クロール失敗理由と内部例外を指定して例外を初期化する
-    /// </summary>
-    /// <param name="category">失敗したカテゴリ</param>
-    /// <param name="message">失敗理由</param>
-    /// <param name="innerException">直接の原因となった例外</param>
-    public DiscasCategoryCrawlException(DiscSourceCategory category, string message, Exception innerException)
-        : base(message, innerException)
-    {
-        Category = category;
-    }
+    /// <summary>解析失敗理由と内部例外を指定して例外を初期化する</summary>
+    public DiscasCategoryCrawlException(DiscSourceCategory category, string message, Exception innerException) : base(message, innerException) => Category = category;
 
-    /// <summary>
-    /// 失敗したリリースカテゴリ
-    /// </summary>
+    /// <summary>失敗したリリースカテゴリ</summary>
     public DiscSourceCategory Category { get; }
 }
