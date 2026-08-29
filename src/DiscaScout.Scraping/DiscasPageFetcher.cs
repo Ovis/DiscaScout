@@ -14,9 +14,9 @@ public sealed class DiscasPageFetcher
 
     static DiscasPageFetcher()
     {
-        // DISCASはWindows-31Jをcharsetとして返すページがある。
-        // .NETでは既定でコードページ系Encodingが有効ではないため、ライブラリ側で登録して
-        // 呼び出し元の初期化方法に依存せずレスポンスをデコードできるようにする。
+        // DISCASはShift_JIS系の文字コードを使用しているため、コードページ932を利用できるようにする。
+        // .NETでは既定でコードページ系Encodingが有効ではないので、ライブラリ側で登録して
+        // 呼び出し元の初期化方法に依存しないようにする。
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
     }
 
@@ -49,13 +49,46 @@ public sealed class DiscasPageFetcher
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken);
 
-        var html = await response.Content.ReadAsStringAsync(cancellationToken);
+        var charset = response.Content.Headers.ContentType?.CharSet;
+
+        // ReadAsStringAsyncはContent-TypeのcharsetをそのままEncoding.GetEncodingへ渡すため、
+        // DISCASが返す「Windows-31J」のような.NETで認識されない別名が含まれると例外になる。
+        // そのため本文はバイト列で取得し、DISCAS固有のcharset表記をこちらでCP932へ正規化してからデコードする。
+        var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+        var encoding = ResolveEncoding(charset);
+        var html = encoding.GetString(bytes);
 
         return new FetchResult(
             response.StatusCode,
             response.RequestMessage?.RequestUri ?? uri,
-            response.Content.Headers.ContentType?.CharSet,
+            charset,
             html);
+    }
+
+    /// <summary>
+    /// HTTPレスポンスのcharset表記から.NETで利用可能な文字コードを解決する
+    /// </summary>
+    /// <param name="charset">Content-Typeヘッダーで指定されたcharset。未指定の場合はnull</param>
+    /// <returns>HTML本文のデコードに使用する文字コード</returns>
+    internal static Encoding ResolveEncoding(string? charset)
+    {
+        if (string.IsNullOrWhiteSpace(charset))
+        {
+            // HTTPヘッダーに指定がない場合は、現在のDISCAS検索ページで一般的なCP932を既定値とする。
+            // 将来UTF-8へ移行した場合は、実レスポンスの確認結果に合わせて判定方法を見直す。
+            return Encoding.GetEncoding(932);
+        }
+
+        var normalizedCharset = charset.Trim().Trim('"');
+
+        // Windows-31JはCP932（Windows版Shift_JIS）を指す表記としてDISCASが使用しているが、
+        // CodePagesEncodingProviderを登録してもこの別名自体は.NETで解決できないため明示的に対応する。
+        if (normalizedCharset.Equals("Windows-31J", StringComparison.OrdinalIgnoreCase))
+        {
+            return Encoding.GetEncoding(932);
+        }
+
+        return Encoding.GetEncoding(normalizedCharset);
     }
 }
 
