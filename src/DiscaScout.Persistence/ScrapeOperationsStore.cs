@@ -102,13 +102,20 @@ public sealed class ScrapeOperationsStore(DiscaScoutDbContext dbContext) : IScra
     }
 
     /// <inheritdoc />
-    public Task<ScrapeRetry?> GetNextDueRetryAsync(DateTimeOffset now, CancellationToken cancellationToken = default)
+    public async Task<ScrapeRetry?> GetNextDueRetryAsync(DateTimeOffset now, CancellationToken cancellationToken = default)
     {
-        return dbContext.ScrapeRetries
+        var pendingRetries = await dbContext.ScrapeRetries
             .AsNoTracking()
-            .Where(x => x.Status == ScrapeRetryStatus.Pending && x.DueAt <= now)
+            .Where(x => x.Status == ScrapeRetryStatus.Pending)
+            .ToListAsync(cancellationToken);
+
+        // SQLiteのEF CoreプロバイダーはDateTimeOffsetの大小比較やORDER BYをSQLへ変換できない。
+        // Retryはカテゴリごとに最大1件しかPendingにならない設計なので、Pending行だけDBで絞り込み、
+        // 日時条件と並び替えはメモリ上で行っても件数・性能ともに問題にならない。
+        return pendingRetries
+            .Where(x => x.DueAt <= now)
             .OrderBy(x => x.DueAt)
-            .FirstOrDefaultAsync(cancellationToken);
+            .FirstOrDefault();
     }
 
     /// <inheritdoc />
@@ -121,20 +128,29 @@ public sealed class ScrapeOperationsStore(DiscaScoutDbContext dbContext) : IScra
             throw new ArgumentOutOfRangeException(nameof(count));
         }
 
-        return await dbContext.ScrapeRuns
+        var runs = await dbContext.ScrapeRuns
             .AsNoTracking()
+            .ToListAsync(cancellationToken);
+
+        // SQLiteではDateTimeOffsetのORDER BYもSQL変換できないため、運用画面用の小規模な履歴一覧は
+        // メモリ上で新しい順に並べ替える。将来履歴件数が大きくなる場合はUTC ticks等の専用列を検討する。
+        return runs
             .OrderByDescending(x => x.StartedAt)
             .Take(count)
-            .ToListAsync(cancellationToken);
+            .ToList();
     }
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<ScrapeRetry>> GetPendingRetriesAsync(CancellationToken cancellationToken = default)
     {
-        return await dbContext.ScrapeRetries
+        var pendingRetries = await dbContext.ScrapeRetries
             .AsNoTracking()
             .Where(x => x.Status == ScrapeRetryStatus.Pending)
-            .OrderBy(x => x.DueAt)
             .ToListAsync(cancellationToken);
+
+        // Pending件数は極小なので、SQLiteが未対応のDateTimeOffset並び替えだけメモリ側で行う。
+        return pendingRetries
+            .OrderBy(x => x.DueAt)
+            .ToList();
     }
 }
