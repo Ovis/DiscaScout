@@ -58,9 +58,8 @@ public sealed class DiscasSnapshotApplier(DiscaScoutDbContext dbContext, TimePro
                 disc = CreateDisc(scraped, now);
                 disc.Sources.Add(CreateSource(category, scraped.SourceRank, now));
                 AddReviewReason(disc, DiscReviewReasonType.New, now);
-                var hadArtistMatchedReason = HasArtistMatchedReason(disc);
                 ArtistWatchService.ApplyCurrentMatches(disc, artistSettings, now);
-                if (!hadArtistMatchedReason && HasArtistMatchedReason(disc))
+                if (HasArtistMatchedReason(disc))
                 {
                     // 通知上の件数はWatch設定数ではなく、今回新たにARTIST_MATCHEDとなったCD数として数える。
                     // 複数のWatch設定に同じCDが一致してもユーザーが確認するCDは1件なので重複計上しない。
