@@ -12,6 +12,8 @@ public sealed class DiscaScoutDbContext(DbContextOptions<DiscaScoutDbContext> op
     public DbSet<DiscSource> DiscSources => Set<DiscSource>();
     public DbSet<DiscReviewReason> DiscReviewReasons => Set<DiscReviewReason>();
     public DbSet<DiscChangeHistory> DiscChangeHistory => Set<DiscChangeHistory>();
+    public DbSet<ArtistSetting> ArtistSettings => Set<ArtistSetting>();
+    public DbSet<DiscArtistMatch> DiscArtistMatches => Set<DiscArtistMatch>();
     public DbSet<ScrapeRun> ScrapeRuns => Set<ScrapeRun>();
     public DbSet<ScrapeRetry> ScrapeRetries => Set<ScrapeRetry>();
     public DbSet<ScrapeScheduleSettings> ScrapeScheduleSettings => Set<ScrapeScheduleSettings>();
@@ -66,6 +68,26 @@ public sealed class DiscaScoutDbContext(DbContextOptions<DiscaScoutDbContext> op
         changeHistory.HasOne(x => x.Disc)
             .WithMany(x => x.ChangeHistory)
             .HasForeignKey(x => x.DiscId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        var artistSetting = modelBuilder.Entity<ArtistSetting>();
+        artistSetting.HasKey(x => x.Id);
+        artistSetting.Property(x => x.Artist).HasMaxLength(1000);
+        artistSetting.Property(x => x.NormalizedArtist).HasMaxLength(1000);
+        artistSetting.HasIndex(x => x.IsArchived);
+        artistSetting.HasIndex(x => new { x.IsWatchEnabled, x.IsArchived });
+
+        var artistMatch = modelBuilder.Entity<DiscArtistMatch>();
+        artistMatch.HasKey(x => x.Id);
+        artistMatch.HasIndex(x => new { x.DiscId, x.ArtistSettingId }).IsUnique();
+        artistMatch.HasIndex(x => new { x.ArtistSettingId, x.IsCurrentMatch });
+        artistMatch.HasOne(x => x.Disc)
+            .WithMany(x => x.ArtistMatches)
+            .HasForeignKey(x => x.DiscId)
+            .OnDelete(DeleteBehavior.Cascade);
+        artistMatch.HasOne(x => x.ArtistSetting)
+            .WithMany(x => x.DiscMatches)
+            .HasForeignKey(x => x.ArtistSettingId)
             .OnDelete(DeleteBehavior.Cascade);
 
         var scrapeRun = modelBuilder.Entity<ScrapeRun>();
