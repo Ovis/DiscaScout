@@ -22,6 +22,7 @@ public sealed class ArtistSetting
     public bool CollectFullCatalog { get; set; }
     public bool IsArchived { get; set; }
     public List<DiscArtistMatch> DiscMatches { get; } = [];
+    public List<DiscArtistCatalog> CatalogEntries { get; } = [];
 }
 
 /// <summary>
@@ -38,6 +39,22 @@ public sealed class DiscArtistMatch
     public DateTimeOffset FirstMatchedAt { get; set; }
     public DateTimeOffset LastMatchedAt { get; set; }
     public DateTimeOffset? LastUnmatchedAt { get; set; }
+}
+
+/// <summary>
+/// 全作品収集で取得したCDとアーティスト設定の所属関係を保持する
+/// </summary>
+public sealed class DiscArtistCatalog
+{
+    public long Id { get; set; }
+    public long DiscId { get; set; }
+    public Disc Disc { get; set; } = null!;
+    public long ArtistSettingId { get; set; }
+    public ArtistSetting ArtistSetting { get; set; } = null!;
+    public bool IsActive { get; set; }
+    public DateTimeOffset FirstSeenAt { get; set; }
+    public DateTimeOffset LastSeenAt { get; set; }
+    public DateTimeOffset? DeactivatedAt { get; set; }
 }
 
 /// <summary>
