@@ -26,6 +26,7 @@ public sealed class ScrapeRunCoordinatorTests
         Assert.Equal(2, operations.Runs.Count);
         var failedRun = Assert.Single(operations.Runs.Where(x => !x.IsSuccess));
         Assert.Equal(ScrapeCategory.Upcoming, failedRun.Category);
+        Assert.Equal(ScrapeFailureType.ProcessingError, failedRun.FailureType);
         Assert.Equal("取得失敗", failedRun.FailureReason);
         var retry = Assert.Single(operations.Retries.Where(x => x.Status == ScrapeRetryStatus.Pending));
         Assert.Equal(1, retry.AttemptNumber);
@@ -101,13 +102,29 @@ public sealed class ScrapeRunCoordinatorTests
         Assert.Equal(ScrapeRetryStatus.Cancelled, duplicate.Status);
     }
 
+    [Fact]
+    public async Task ExecuteManualCategoryAsync_指定カテゴリだけを実行して履歴を保存する()
+    {
+        var crawler = new StubCrawler();
+        crawler.AddSuccess(DiscSourceCategory.New);
+        var operations = new StubOperationsStore();
+        var coordinator = CreateCoordinator(crawler, operations, new TestTimeProvider(DateTimeOffset.UtcNow));
+
+        var result = await coordinator.ExecuteManualCategoryAsync(ScrapeCategory.New);
+
+        Assert.True(result.IsSuccess);
+        var run = Assert.Single(operations.Runs);
+        Assert.Equal(ScrapeExecutionType.Manual, run.ExecutionType);
+        Assert.Equal(ScrapeCategory.New, run.Category);
+    }
+
     private static ScrapeRunCoordinator CreateCoordinator(
         StubCrawler crawler,
         StubOperationsStore operations,
         TimeProvider clock)
     {
         return new ScrapeRunCoordinator(
-            new DiscasScrapeService(crawler, new StubSnapshotStore()),
+            new DiscasScrapeService(crawler, new StubSnapshotStore(), operations, new StubScrapeGuardStore()),
             operations,
             clock);
     }
@@ -168,6 +185,21 @@ public sealed class ScrapeRunCoordinatorTests
             => Task.FromResult(new SnapshotApplyResult(1, 0, 0));
     }
 
+    private sealed class StubScrapeGuardStore : IScrapeGuardStore
+    {
+        public Task<ScrapeGuardSettings> GetAsync(ScrapeCategory category, CancellationToken cancellationToken = default)
+            => Task.FromResult(new ScrapeGuardSettings { Category = category });
+
+        public Task EnableCountDropOverrideAsync(ScrapeCategory category, DateTime enabledAt, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task CancelCountDropOverrideAsync(ScrapeCategory category, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task ConsumeCountDropOverrideAsync(ScrapeCategory category, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+    }
+
     private sealed class StubOperationsStore : IScrapeOperationsStore
     {
         public List<ScrapeRun> Runs { get; } = [];
@@ -219,6 +251,9 @@ public sealed class ScrapeRunCoordinatorTests
 
         public Task<ScrapeRetry?> GetNextDueRetryAsync(DateTime now, CancellationToken cancellationToken = default)
             => Task.FromResult(Retries.Where(x => x.Status == ScrapeRetryStatus.Pending && x.DueAt <= now).OrderBy(x => x.DueAt).FirstOrDefault());
+
+        public Task<ScrapeRun?> GetLastAcceptedRunAsync(ScrapeCategory category, CancellationToken cancellationToken = default)
+            => Task.FromResult(Runs.Where(x => x.Category == category && x.IsSuccess && x.FetchedCount != null).OrderByDescending(x => x.CompletedAt).FirstOrDefault());
     }
 
     private sealed class TestTimeProvider(DateTimeOffset now) : TimeProvider
