@@ -156,6 +156,40 @@ public sealed class DiscDetailModel(
     public static string FormatJapanTime(DateTime? value) => value is null ? "-" : FormatJapanTime(value.Value);
 
     /// <summary>
+    /// DISCASのCDレンタル経過日数定義に従って現在の新作区分を求める
+    /// </summary>
+    /// <param name="rentalStartDate">DISCASから取得したレンタル開始日</param>
+    /// <returns>近日リリース、新作、準新作、旧作のいずれか。開始日未取得時はnull</returns>
+    public static string? FormatRentalCategory(DateOnly? rentalStartDate)
+    {
+        if (rentalStartDate is null)
+        {
+            return null;
+        }
+
+        // DISCASの区分は日付単位なので、サーバーのタイムゾーンに依存せず日本時間の当日で判定する。
+        var todayInJapan = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, JapanTimeZone).DateTime);
+        var elapsedDays = todayInJapan.DayNumber - rentalStartDate.Value.DayNumber;
+
+        if (elapsedDays < 0)
+        {
+            return "近日リリース";
+        }
+
+        if (elapsedDays <= 90)
+        {
+            return "新作";
+        }
+
+        if (elapsedDays <= 180)
+        {
+            return "準新作";
+        }
+
+        return "旧作";
+    }
+
+    /// <summary>
     /// 詳細情報の取得状態を表示用文字列へ変換する
     /// </summary>
     public static string FormatDetailStatus(Disc disc)
