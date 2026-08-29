@@ -3,6 +3,9 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/main/VisualStudio.gitignore
 
+# DiscaScout local data
+src/DiscaScout.Web/data/images/
+
 # User-specific files
 *.rsuser
 *.suo
@@ -161,7 +164,7 @@ _ReSharper*/
 *.[Rr]e[Ss]harper
 *.DotSettings.user
 
-# TeamCity is a build add-in
+# TeamCity*
 _TeamCity*
 
 # DotCover is a Code Coverage Tool
@@ -218,8 +221,7 @@ publish/
 *.publishproj
 
 # Microsoft Azure Web App publish settings. Comment the next line if you want to
-# checkin your Azure Web App publish settings, but sensitive information contained
-# in these scripts will be unencrypted
+# checkin your web deploy settings, but sensitive information contained in these scripts will be unencrypted
 PublishScripts/
 
 # NuGet Packages
