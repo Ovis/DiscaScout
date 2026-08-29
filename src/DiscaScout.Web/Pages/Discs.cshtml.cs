@@ -27,6 +27,12 @@ public sealed class DiscsModel(DiscaScoutDbContext dbContext) : PageModel
     [BindProperty(SupportsGet = true, Name = "genre")]
     public string? Genre { get; set; }
 
+    [BindProperty(SupportsGet = true, Name = "excludeMaxi")]
+    public bool ExcludeMaxi { get; set; }
+
+    [BindProperty(SupportsGet = true, Name = "excludeAlbum")]
+    public bool ExcludeAlbum { get; set; }
+
     [BindProperty(SupportsGet = true, Name = "rental")]
     public string Rental { get; set; } = "all";
 
@@ -68,6 +74,7 @@ public sealed class DiscsModel(DiscaScoutDbContext dbContext) : PageModel
 
         query = ApplyTab(query);
         query = ApplySearch(query);
+        query = ApplyFormatFilter(query);
         query = ApplyRentalFilter(query);
         query = ApplySort(query);
 
@@ -183,10 +190,10 @@ public sealed class DiscsModel(DiscaScoutDbContext dbContext) : PageModel
         return "旧作";
     }
 
-    public string GetTabUrl(string tab) => BuildListUrl(tab, TitleSearch, ArtistSearch, Genre, Rental, Sort, PageSize, 1);
-    public string GetArtistUrl(string artist) => BuildListUrl(Tab, TitleSearch, artist, Genre, Rental, Sort, PageSize, 1);
-    public string GetGenreUrl(string genre) => BuildListUrl(Tab, TitleSearch, ArtistSearch, genre, Rental, Sort, PageSize, 1);
-    public string GetPageUrl(int page) => BuildListUrl(Tab, TitleSearch, ArtistSearch, Genre, Rental, Sort, PageSize, page);
+    public string GetTabUrl(string tab) => BuildListUrl(tab, TitleSearch, ArtistSearch, Genre, ExcludeMaxi, ExcludeAlbum, Rental, Sort, PageSize, 1);
+    public string GetArtistUrl(string artist) => BuildListUrl(Tab, TitleSearch, artist, Genre, ExcludeMaxi, ExcludeAlbum, Rental, Sort, PageSize, 1);
+    public string GetGenreUrl(string genre) => BuildListUrl(Tab, TitleSearch, ArtistSearch, genre, ExcludeMaxi, ExcludeAlbum, Rental, Sort, PageSize, 1);
+    public string GetPageUrl(int page) => BuildListUrl(Tab, TitleSearch, ArtistSearch, Genre, ExcludeMaxi, ExcludeAlbum, Rental, Sort, PageSize, page);
 
     private IQueryable<Disc> ApplyTab(IQueryable<Disc> query) => Tab switch
     {
@@ -214,6 +221,15 @@ public sealed class DiscsModel(DiscaScoutDbContext dbContext) : PageModel
             // その配下の中・小ジャンルを持つCDもGenreLargeの一致によって自然に含まれる。
             query = query.Where(x => x.GenreLarge == Genre || x.GenreMiddle == Genre || x.GenreSmall == Genre);
         }
+        return query;
+    }
+
+    private IQueryable<Disc> ApplyFormatFilter(IQueryable<Disc> query)
+    {
+        // 検索結果のフォーマット区分は一覧取得時に確定しているIsMaxiSingleを使う。
+        // 現時点ではDISCAS上のCDをMAXIとそれ以外（アルバム）として扱うため、両方を除外すると結果は0件になる。
+        if (ExcludeMaxi) query = query.Where(x => !x.IsMaxiSingle);
+        if (ExcludeAlbum) query = query.Where(x => x.IsMaxiSingle);
         return query;
     }
 
@@ -277,7 +293,7 @@ public sealed class DiscsModel(DiscaScoutDbContext dbContext) : PageModel
             disc.ReviewReasons.Select(x => new ReviewReasonUndoState(x.Reason, x.CreatedAt)).ToArray()));
     }
 
-    private bool HasSearchFilters() => !string.IsNullOrWhiteSpace(TitleSearch) || !string.IsNullOrWhiteSpace(ArtistSearch) || !string.IsNullOrWhiteSpace(Genre);
+    private bool HasSearchFilters() => !string.IsNullOrWhiteSpace(TitleSearch) || !string.IsNullOrWhiteSpace(ArtistSearch) || !string.IsNullOrWhiteSpace(Genre) || ExcludeMaxi || ExcludeAlbum;
     private static IEnumerable<string> SplitTerms(string? value) => string.IsNullOrWhiteSpace(value) ? [] : value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     private void NormalizeInputs()
@@ -294,7 +310,7 @@ public sealed class DiscsModel(DiscaScoutDbContext dbContext) : PageModel
 
     private IActionResult RedirectBack(string? returnUrl) => !string.IsNullOrWhiteSpace(returnUrl) && Url.IsLocalUrl(returnUrl) ? LocalRedirect(returnUrl) : RedirectToPage();
 
-    private static string BuildListUrl(string tab, string? title, string? artist, string? genre, string rental, string sort, int size, int page)
+    private static string BuildListUrl(string tab, string? title, string? artist, string? genre, bool excludeMaxi, bool excludeAlbum, string rental, string sort, int size, int page)
     {
         var values = new Dictionary<string, string>
         {
@@ -306,6 +322,8 @@ public sealed class DiscsModel(DiscaScoutDbContext dbContext) : PageModel
         if (!string.IsNullOrWhiteSpace(title)) values["title"] = title;
         if (!string.IsNullOrWhiteSpace(artist)) values["artist"] = artist;
         if (!string.IsNullOrWhiteSpace(genre)) values["genre"] = genre;
+        if (excludeMaxi) values["excludeMaxi"] = "true";
+        if (excludeAlbum) values["excludeAlbum"] = "true";
         if (page > 1) values["p"] = page.ToString();
         return QueryHelpers.AddQueryString("/discs", values);
     }
