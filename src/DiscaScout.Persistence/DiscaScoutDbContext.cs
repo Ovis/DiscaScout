@@ -9,6 +9,7 @@ namespace DiscaScout.Persistence;
 public sealed class DiscaScoutDbContext(DbContextOptions<DiscaScoutDbContext> options) : DbContext(options)
 {
     public DbSet<Disc> Discs => Set<Disc>();
+    public DbSet<DiscTrack> DiscTracks => Set<DiscTrack>();
     public DbSet<DiscSource> DiscSources => Set<DiscSource>();
     public DbSet<DiscReviewReason> DiscReviewReasons => Set<DiscReviewReason>();
     public DbSet<DiscChangeHistory> DiscChangeHistory => Set<DiscChangeHistory>();
@@ -45,6 +46,17 @@ public sealed class DiscaScoutDbContext(DbContextOptions<DiscaScoutDbContext> op
         disc.HasIndex(x => x.NormalizedTitle);
         disc.HasIndex(x => x.NormalizedArtist);
         disc.HasIndex(x => x.GenreLarge);
+        disc.HasIndex(x => new { x.DetailRefreshCompleted, x.DetailFetchedAt });
+
+        var track = modelBuilder.Entity<DiscTrack>();
+        track.HasKey(x => x.Id);
+        track.Property(x => x.Title).HasMaxLength(1000);
+        track.Property(x => x.Duration).HasMaxLength(100);
+        track.HasIndex(x => new { x.DiscId, x.TrackNumber }).IsUnique();
+        track.HasOne(x => x.Disc)
+            .WithMany(x => x.Tracks)
+            .HasForeignKey(x => x.DiscId)
+            .OnDelete(DeleteBehavior.Cascade);
 
         var source = modelBuilder.Entity<DiscSource>();
         source.HasKey(x => x.Id);

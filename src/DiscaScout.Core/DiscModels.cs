@@ -22,6 +22,12 @@ public sealed class Disc
     public string? ImageUrl { get; set; }
     public string? ImagePath { get; set; }
     public DateOnly? RentalStartDate { get; set; }
+    public bool IsMaxiSingle { get; set; }
+    public bool? IsTwoDisc { get; set; }
+    public string? Description { get; set; }
+    public DateTime? DetailLastAttemptAt { get; set; }
+    public DateTime? DetailFetchedAt { get; set; }
+    public bool DetailRefreshCompleted { get; set; }
     public DateTime FirstSeenAt { get; set; }
     public DateTime LastSeenAt { get; set; }
     public DateTime LastUpdatedAt { get; set; }
@@ -34,6 +40,20 @@ public sealed class Disc
     public List<DiscChangeHistory> ChangeHistory { get; } = [];
     public List<DiscArtistMatch> ArtistMatches { get; } = [];
     public List<DiscArtistCatalog> ArtistCatalogEntries { get; } = [];
+    public List<DiscTrack> Tracks { get; } = [];
+}
+
+/// <summary>
+/// DISCAS詳細ページから取得したCDの曲目を保持する
+/// </summary>
+public sealed class DiscTrack
+{
+    public long Id { get; set; }
+    public long DiscId { get; set; }
+    public Disc Disc { get; set; } = null!;
+    public int TrackNumber { get; set; }
+    public required string Title { get; set; }
+    public string? Duration { get; set; }
 }
 
 /// <summary>

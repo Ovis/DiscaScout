@@ -9,7 +9,9 @@ namespace DiscaScout.Web.Pages;
 /// <summary>
 /// CD単体のメタデータ、取得元、変更履歴、Artist Watch状態とレビュー操作を提供する
 /// </summary>
-public sealed class DiscDetailModel(DiscaScoutDbContext dbContext) : PageModel
+public sealed class DiscDetailModel(
+    DiscaScoutDbContext dbContext,
+    DiscDetailFetchSignal detailFetchSignal) : PageModel
 {
     private static readonly TimeZoneInfo JapanTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Asia/Tokyo");
 
@@ -37,7 +39,21 @@ public sealed class DiscDetailModel(DiscaScoutDbContext dbContext) : PageModel
             return NotFound();
         }
 
+        // DISCAS側の作品詳細は段落や改行がほぼなく、そのままでは長文を追いにくい。
+        // 保存値は原文のまま維持し、詳細画面の表示モデルだけ句点ごとに改行して可読性を補う。
+        if (!string.IsNullOrWhiteSpace(disc.Description))
+        {
+            disc.Description = disc.Description.Replace("。", $"。{Environment.NewLine}", StringComparison.Ordinal);
+        }
+
         Disc = disc;
+        if (!disc.DetailRefreshCompleted)
+        {
+            // 詳細画面で実際に参照されたCDは、全件を順番に補完するBackgroundServiceより先に確認したい。
+            // Web要求自体ではDISCASへアクセスせず、優先キューへ通知するだけにして画面表示を待たせない。
+            detailFetchSignal.Request(id);
+        }
+
         return Page();
     }
 
@@ -140,6 +156,68 @@ public sealed class DiscDetailModel(DiscaScoutDbContext dbContext) : PageModel
     public static string FormatJapanTime(DateTime? value) => value is null ? "-" : FormatJapanTime(value.Value);
 
     /// <summary>
+    /// DISCASのCDレンタル経過日数定義に従って現在の新作区分を求める
+    /// </summary>
+    /// <param name="rentalStartDate">DISCASから取得したレンタル開始日</param>
+    /// <returns>近日リリース、新作、準新作、旧作のいずれか。開始日未取得時はnull</returns>
+    public static string? FormatRentalCategory(DateOnly? rentalStartDate)
+    {
+        if (rentalStartDate is null)
+        {
+            return null;
+        }
+
+        // DISCASの区分は日付単位なので、サーバーのタイムゾーンに依存せず日本時間の当日で判定する。
+        var todayInJapan = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, JapanTimeZone).DateTime);
+        var elapsedDays = todayInJapan.DayNumber - rentalStartDate.Value.DayNumber;
+
+        if (elapsedDays < 0)
+        {
+            return "近日リリース";
+        }
+
+        if (elapsedDays <= 90)
+        {
+            return "新作";
+        }
+
+        if (elapsedDays <= 180)
+        {
+            return "準新作";
+        }
+
+        return "旧作";
+    }
+
+    /// <summary>
+    /// 詳細情報の取得状態を表示用文字列へ変換する
+    /// </summary>
+    public static string FormatDetailStatus(Disc disc)
+    {
+        if (disc.DetailRefreshCompleted)
+        {
+            return "取得完了";
+        }
+
+        if (disc.DetailFetchedAt is null)
+        {
+            return "未取得（バックグラウンド取得待ち）";
+        }
+
+        return "取得済み（レンタル開始後に最終確認予定）";
+    }
+
+    /// <summary>
+    /// 2枚組判定を表示用文字列へ変換する
+    /// </summary>
+    public static string FormatTwoDisc(bool? isTwoDisc) => isTwoDisc switch
+    {
+        true => "2枚組",
+        false => "2枚組ではない",
+        null => "未取得"
+    };
+
+    /// <summary>
     /// ReviewReasonを日本語表示へ変換する
     /// </summary>
     public static string FormatReviewReason(DiscReviewReasonType reason) => reason switch
@@ -169,6 +247,7 @@ public sealed class DiscDetailModel(DiscaScoutDbContext dbContext) : PageModel
             .Include(x => x.Sources)
             .Include(x => x.ReviewReasons)
             .Include(x => x.ChangeHistory)
+            .Include(x => x.Tracks)
             .Include(x => x.ArtistMatches)
                 .ThenInclude(x => x.ArtistSetting)
             .Include(x => x.ArtistCatalogEntries)

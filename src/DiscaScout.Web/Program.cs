@@ -19,14 +19,16 @@ builder.Services.AddRazorPages();
 builder.Services.AddDbContext<DiscaScoutDbContext>(options =>
     options.UseSqlite($"Data Source={databasePath}"));
 
-// 検索HTMLはCategory/Artist Catalogをまたいで完全直列化し、最低2秒間隔と10ページごとの追加休止を共有する。
+// DISCAS HTMLはCategory/Artist Catalog/詳細ページをまたいで完全直列化し、
+// 最低2秒間隔と10ページごとの追加休止を共有する。
 builder.Services.AddSingleton<DiscasRequestThrottle>();
 builder.Services.AddHttpClient<DiscasPageFetcher>();
 
-// ジャケット画像は検索HTMLとは独立したBackgroundServiceで最大4並列取得する。
+// ジャケット画像はDISCAS HTMLとは独立したBackgroundServiceで最大4並列取得する。
 // 画像取得を検索処理の完了条件に含めず、一覧データを先に利用可能にする。
 builder.Services.AddHttpClient("disc-image-cache");
 builder.Services.AddScoped<DiscasSearchResultParser>();
+builder.Services.AddScoped<DiscasDiscDetailParser>();
 builder.Services.AddScoped<DiscasCategoryCrawler>();
 builder.Services.AddScoped<IDiscasCategoryCrawler>(sp => sp.GetRequiredService<DiscasCategoryCrawler>());
 builder.Services.AddScoped<DiscasArtistCatalogCrawler>();
@@ -40,6 +42,7 @@ builder.Services.AddScoped(sp => new DiscImageCacheService(
     sp.GetRequiredService<IHttpClientFactory>().CreateClient("disc-image-cache"),
     Path.GetFullPath(imageCachePath)));
 builder.Services.AddScoped<ArtistCatalogCollectionService>();
+builder.Services.AddScoped<DiscDetailMetadataService>();
 builder.Services.AddScoped<ScrapeOperationsStore>();
 builder.Services.AddScoped<IScrapeOperationsStore>(sp => sp.GetRequiredService<ScrapeOperationsStore>());
 builder.Services.AddScoped<IScrapeOperationsQueryStore>(sp => sp.GetRequiredService<ScrapeOperationsStore>());
@@ -49,8 +52,10 @@ builder.Services.AddScoped<DiscasScrapeService>();
 builder.Services.AddScoped<ScrapeRunCoordinator>();
 builder.Services.AddSingleton<ScrapeExecutionGate>();
 builder.Services.AddSingleton<ManualWorkSignal>();
+builder.Services.AddSingleton<DiscDetailFetchSignal>();
 builder.Services.AddHostedService<ScrapeBackgroundService>();
 builder.Services.AddHostedService<DiscImageCacheBackgroundService>();
+builder.Services.AddHostedService<DiscDetailMetadataBackgroundService>();
 
 var app = builder.Build();
 

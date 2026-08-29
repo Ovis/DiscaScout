@@ -43,6 +43,7 @@
         .badge.pickup { background: #e8dcff; }
         .badge.rented { background: #e5f6ea; }
         .badge.archived { background: #f2dede; }
+        .badge.format { background: #dceeff; }
         .actions { display: flex; flex-direction: column; gap: 6px; align-items: stretch; min-width: 112px; }
         .actions form { margin: 0; }
         .actions button, .actions a { width: 100%; box-sizing: border-box; text-align: center; }
@@ -119,6 +120,8 @@
                         <span class="badge reason">@reason.Reason</span>
                     }
                     @if (!string.IsNullOrWhiteSpace(pickupArtists)) { <span class="badge pickup">★ @pickupArtists</span> }
+                    @if (disc.IsMaxiSingle) { <span class="badge format">MAXI</span> }
+                    @if (disc.IsTwoDisc == true) { <span class="badge format">2枚組</span> }
                     @if (disc.IsRented) { <span class="badge rented">借りた</span> }
                     @if (disc.IsArchived) { <span class="badge archived">ARCHIVED</span> }
                 </div>

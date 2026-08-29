@@ -15,6 +15,7 @@ public sealed partial class DiscasSearchResultParser
     private const string UnavailableArtistSelector = ".card-body-searchCd .cd-search-artist-not-available";
     private const string ImageSelector = ".card-img";
     private const string NoImagePath = "/img/jacket/no_image_cd_s.png";
+    private const string MaxiPrefix = "【MAXI】";
 
     private readonly HtmlParser htmlParser = new();
 
@@ -93,7 +94,8 @@ public sealed partial class DiscasSearchResultParser
                 imageUrl,
                 RentalStartDate: null,
                 category,
-                SourceRank: sourceRankOffset + index + 1));
+                SourceRank: sourceRankOffset + index + 1,
+                IsMaxiSingle: title.StartsWith(MaxiPrefix, StringComparison.Ordinal)));
         }
 
         var totalCount = ParseTotalCount(document.QuerySelector(".pagination-cd-search p")?.TextContent);
