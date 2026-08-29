@@ -9,32 +9,109 @@ namespace DiscaScout.Persistence;
 /// <summary>
 /// DISCASで取得したジャケット画像をローカルへ安全にキャッシュし、DiscのImagePathを更新する
 /// </summary>
-public sealed class DiscImageCacheService(
-    DiscaScoutDbContext dbContext,
-    HttpClient httpClient,
-    string imageDirectory,
-    TimeSpan? minimumRequestInterval = null)
+public sealed class DiscImageCacheService
 {
-    private static readonly TimeSpan DefaultMinimumRequestInterval = TimeSpan.FromSeconds(2);
+    private const int DefaultMaximumConcurrentDownloads = 4;
     private static readonly HashSet<string> AllowedExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".jpg", ".jpeg", ".png", ".webp", ".gif"
     };
 
-    private readonly TimeSpan requestInterval = minimumRequestInterval ?? DefaultMinimumRequestInterval;
-    private readonly SemaphoreSlim requestGate = new(1, 1);
+    private readonly DiscaScoutDbContext dbContext;
+    private readonly HttpClient httpClient;
+    private readonly string imageDirectory;
+    private readonly SemaphoreSlim downloadGate;
+    private readonly TimeSpan minimumRequestInterval;
+    private readonly SemaphoreSlim requestStartGate = new(1, 1);
     private DateTimeOffset? lastRequestStartedAt;
+
+    /// <summary>
+    /// 最大4並列で画像を取得する本番用サービスを初期化する
+    /// </summary>
+    public DiscImageCacheService(
+        DiscaScoutDbContext dbContext,
+        HttpClient httpClient,
+        string imageDirectory)
+        : this(dbContext, httpClient, imageDirectory, TimeSpan.Zero, DefaultMaximumConcurrentDownloads)
+    {
+    }
+
+    /// <summary>
+    /// テスト用に画像リクエスト開始間隔を指定して初期化する
+    /// </summary>
+    internal DiscImageCacheService(
+        DiscaScoutDbContext dbContext,
+        HttpClient httpClient,
+        string imageDirectory,
+        TimeSpan minimumRequestInterval)
+        : this(dbContext, httpClient, imageDirectory, minimumRequestInterval, DefaultMaximumConcurrentDownloads)
+    {
+    }
+
+    /// <summary>
+    /// テスト用に開始間隔と最大並列数を指定して初期化する
+    /// </summary>
+    internal DiscImageCacheService(
+        DiscaScoutDbContext dbContext,
+        HttpClient httpClient,
+        string imageDirectory,
+        TimeSpan minimumRequestInterval,
+        int maximumConcurrentDownloads)
+    {
+        if (minimumRequestInterval < TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(minimumRequestInterval));
+        }
+        if (maximumConcurrentDownloads <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maximumConcurrentDownloads));
+        }
+
+        this.dbContext = dbContext;
+        this.httpClient = httpClient;
+        this.imageDirectory = imageDirectory;
+        this.minimumRequestInterval = minimumRequestInterval;
+        downloadGate = new SemaphoreSlim(maximumConcurrentDownloads, maximumConcurrentDownloads);
+    }
+
+    /// <summary>
+    /// 未取得またはURL変更済みの画像を最大件数まで同期する
+    /// </summary>
+    /// <param name="maxCount">1バッチで処理する最大CD数</param>
+    /// <param name="cancellationToken">同期処理を中断するためのトークン</param>
+    /// <returns>同期件数と失敗件数</returns>
+    public async Task<DiscImageCacheResult> SyncPendingBatchAsync(
+        int maxCount,
+        CancellationToken cancellationToken = default)
+    {
+        if (maxCount <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxCount));
+        }
+
+        var candidates = await dbContext.Discs
+            .AsNoTracking()
+            .Where(x => x.ImageUrl != null || x.ImagePath != null)
+            .OrderBy(x => x.Id)
+            .Select(x => new { x.DiscasId, x.ImageUrl, x.ImagePath })
+            .ToListAsync(cancellationToken);
+
+        var pendingIds = candidates
+            .Where(x => IsPending(x.DiscasId, x.ImageUrl, x.ImagePath))
+            .Take(maxCount)
+            .Select(x => x.DiscasId)
+            .ToArray();
+
+        return await SyncAsync(pendingIds, cancellationToken);
+    }
 
     /// <summary>
     /// 指定したDISCAS IDのCDについて、現在のImageUrlに対応する画像キャッシュを同期する
     /// </summary>
     /// <remarks>
-    /// 画像取得失敗はCD単位で結果へ記録し、既存ImagePathは変更しない。
-    /// 新しい画像は一時ファイルへ保存してから本番ファイルへ移し、DB更新成功後に旧画像を削除する。
+    /// HTTP取得だけを最大4並列で行い、EF Coreの追跡エンティティ更新は並列化しない。
+    /// これにより一般的なブラウザの画像読み込みに近い並列度を許容しつつ、DbContextのスレッド安全性を維持する。
     /// </remarks>
-    /// <param name="discasIds">同期対象のDISCAS商品ID</param>
-    /// <param name="cancellationToken">同期処理を中断するためのトークン</param>
-    /// <returns>同期件数と失敗件数</returns>
     public async Task<DiscImageCacheResult> SyncAsync(
         IEnumerable<string> discasIds,
         CancellationToken cancellationToken = default)
@@ -54,22 +131,18 @@ public sealed class DiscImageCacheService(
             .OrderBy(x => x.Id)
             .ToListAsync(cancellationToken);
 
-        var cached = 0;
         var skipped = 0;
         var cleared = 0;
-        var failed = 0;
+        var downloadTargets = new List<ImageDownloadTarget>();
 
         foreach (var disc in discs)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
             if (string.IsNullOrWhiteSpace(disc.ImageUrl))
             {
                 if (!string.IsNullOrWhiteSpace(disc.ImagePath))
                 {
                     var oldPath = disc.ImagePath;
                     disc.ImagePath = null;
-                    await dbContext.SaveChangesAsync(cancellationToken);
                     TryDelete(oldPath);
                     cleared++;
                 }
@@ -77,7 +150,6 @@ public sealed class DiscImageCacheService(
                 {
                     skipped++;
                 }
-
                 continue;
             }
 
@@ -89,93 +161,147 @@ public sealed class DiscImageCacheService(
                 continue;
             }
 
-            var temporaryPath = targetPath + ".tmp";
-            try
+            downloadTargets.Add(new ImageDownloadTarget(
+                disc.Id,
+                disc.ImageUrl,
+                disc.ImagePath,
+                targetPath,
+                targetPath + ".tmp"));
+        }
+
+        if (cleared > 0)
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        var results = await Task.WhenAll(downloadTargets.Select(x => DownloadTargetAsync(x, cancellationToken)));
+        var cached = 0;
+        var failed = 0;
+
+        foreach (var result in results)
+        {
+            var disc = discs.Single(x => x.Id == result.Target.DiscId);
+            if (!result.IsSuccess)
             {
-                await DownloadAsync(new Uri(disc.ImageUrl, UriKind.Absolute), temporaryPath, cancellationToken);
-
-                if (File.Exists(targetPath))
-                {
-                    File.Delete(targetPath);
-                }
-                File.Move(temporaryPath, targetPath);
-
-                var oldPath = disc.ImagePath;
-                disc.ImagePath = targetPath;
-                await dbContext.SaveChangesAsync(cancellationToken);
-
-                if (!string.IsNullOrWhiteSpace(oldPath)
-                    && !string.Equals(oldPath, targetPath, StringComparison.Ordinal))
-                {
-                    TryDelete(oldPath);
-                }
-
-                cached++;
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                TryDelete(temporaryPath);
-                throw;
-            }
-            catch
-            {
-                // 画像取得の障害で通常スクレイピング結果まで失敗扱いにしない。
-                // ImagePathを変更しないことで既存キャッシュを維持し、次回同期時に再試行できる。
-                TryDelete(temporaryPath);
                 failed++;
+                continue;
             }
+
+            if (File.Exists(result.Target.TargetPath))
+            {
+                File.Delete(result.Target.TargetPath);
+            }
+            File.Move(result.Target.TemporaryPath, result.Target.TargetPath);
+
+            disc.ImagePath = result.Target.TargetPath;
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            if (!string.IsNullOrWhiteSpace(result.Target.OldPath)
+                && !string.Equals(result.Target.OldPath, result.Target.TargetPath, StringComparison.Ordinal))
+            {
+                TryDelete(result.Target.OldPath);
+            }
+            cached++;
         }
 
         return new DiscImageCacheResult(cached, skipped, cleared, failed);
     }
 
-    private async Task DownloadAsync(Uri uri, string temporaryPath, CancellationToken cancellationToken)
+    private async Task<ImageDownloadResult> DownloadTargetAsync(
+        ImageDownloadTarget target,
+        CancellationToken cancellationToken)
     {
-        await requestGate.WaitAsync(cancellationToken);
+        await downloadGate.WaitAsync(cancellationToken);
+        try
+        {
+            try
+            {
+                await WaitForOptionalStartIntervalAsync(cancellationToken);
+                using var response = await httpClient.GetAsync(
+                    new Uri(target.ImageUrl, UriKind.Absolute),
+                    HttpCompletionOption.ResponseHeadersRead,
+                    cancellationToken);
+                if (response.StatusCode is < HttpStatusCode.OK or >= HttpStatusCode.MultipleChoices)
+                {
+                    throw new HttpRequestException($"画像取得に失敗した: HTTP {(int)response.StatusCode} {response.StatusCode}");
+                }
+
+                var mediaType = response.Content.Headers.ContentType?.MediaType;
+                if (mediaType is null || !mediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidDataException($"画像ではないContent-Typeが返された: {mediaType ?? "(none)"}");
+                }
+
+                await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
+                await using var output = new FileStream(
+                    target.TemporaryPath,
+                    FileMode.Create,
+                    FileAccess.Write,
+                    FileShare.None,
+                    bufferSize: 81920,
+                    useAsync: true);
+                await input.CopyToAsync(output, cancellationToken);
+                await output.FlushAsync(cancellationToken);
+                if (output.Length == 0)
+                {
+                    throw new InvalidDataException("取得した画像が0バイトだった");
+                }
+
+                return new ImageDownloadResult(target, true);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                TryDelete(target.TemporaryPath);
+                throw;
+            }
+            catch
+            {
+                // 画像取得失敗は検索結果の完全性とは独立しているため、次回BackgroundService実行で再試行する。
+                TryDelete(target.TemporaryPath);
+                return new ImageDownloadResult(target, false);
+            }
+        }
+        finally
+        {
+            downloadGate.Release();
+        }
+    }
+
+    private async Task WaitForOptionalStartIntervalAsync(CancellationToken cancellationToken)
+    {
+        if (minimumRequestInterval <= TimeSpan.Zero)
+        {
+            return;
+        }
+
+        await requestStartGate.WaitAsync(cancellationToken);
         try
         {
             if (lastRequestStartedAt is not null)
             {
-                var remaining = requestInterval - (DateTimeOffset.UtcNow - lastRequestStartedAt.Value);
+                var remaining = minimumRequestInterval - (DateTimeOffset.UtcNow - lastRequestStartedAt.Value);
                 if (remaining > TimeSpan.Zero)
                 {
                     await Task.Delay(remaining, cancellationToken);
                 }
             }
-
             lastRequestStartedAt = DateTimeOffset.UtcNow;
-            using var response = await httpClient.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-            if (response.StatusCode is < HttpStatusCode.OK or >= HttpStatusCode.MultipleChoices)
-            {
-                throw new HttpRequestException($"画像取得に失敗した: HTTP {(int)response.StatusCode} {response.StatusCode}");
-            }
-
-            var mediaType = response.Content.Headers.ContentType?.MediaType;
-            if (mediaType is null || !mediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidDataException($"画像ではないContent-Typeが返された: {mediaType ?? "(none)"}");
-            }
-
-            await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
-            await using var output = new FileStream(
-                temporaryPath,
-                FileMode.Create,
-                FileAccess.Write,
-                FileShare.None,
-                bufferSize: 81920,
-                useAsync: true);
-            await input.CopyToAsync(output, cancellationToken);
-            await output.FlushAsync(cancellationToken);
-
-            if (output.Length == 0)
-            {
-                throw new InvalidDataException("取得した画像が0バイトだった");
-            }
         }
         finally
         {
-            requestGate.Release();
+            requestStartGate.Release();
         }
+    }
+
+    private bool IsPending(string discasId, string? imageUrl, string? imagePath)
+    {
+        if (string.IsNullOrWhiteSpace(imageUrl))
+        {
+            return !string.IsNullOrWhiteSpace(imagePath);
+        }
+
+        var targetPath = BuildTargetPath(discasId, imageUrl);
+        return !string.Equals(imagePath, targetPath, StringComparison.Ordinal) || !File.Exists(targetPath);
     }
 
     private string BuildTargetPath(string discasId, string imageUrl)
@@ -205,24 +331,32 @@ public sealed class DiscImageCacheService(
         catch (IOException)
         {
             // DBは既に新しいImagePathへ切り替わっているため、旧ファイル削除失敗で処理全体を戻さない。
-            // 孤立ファイルの清掃は将来の保守処理で扱えるよう、ここではデータ整合性を優先する。
         }
         catch (UnauthorizedAccessException)
         {
-            // 同上。読み取り専用化など一時的なファイルシステム要因で新しいキャッシュまで無効にしない。
+            // 一時的なファイルシステム要因で新しいキャッシュまで無効にしない。
         }
     }
+
+    private sealed record ImageDownloadTarget(
+        long DiscId,
+        string ImageUrl,
+        string? OldPath,
+        string TargetPath,
+        string TemporaryPath);
+
+    private sealed record ImageDownloadResult(ImageDownloadTarget Target, bool IsSuccess);
 }
 
 /// <summary>
 /// ジャケット画像キャッシュ同期結果を保持する
 /// </summary>
-/// <param name="CachedCount">新規取得またはURL変更により更新した件数</param>
-/// <param name="SkippedCount">既存キャッシュ利用または画像未登録で処理不要だった件数</param>
-/// <param name="ClearedCount">画像未登録へ変化したためImagePathを解除した件数</param>
-/// <param name="FailedCount">画像取得または保存に失敗し既存状態を維持した件数</param>
 public sealed record DiscImageCacheResult(
     int CachedCount,
     int SkippedCount,
     int ClearedCount,
-    int FailedCount);
+    int FailedCount)
+{
+    /// <summary>このバッチで実際に処理対象となった件数</summary>
+    public int ProcessedCount => CachedCount + ClearedCount + FailedCount;
+}
