@@ -20,6 +20,20 @@ public sealed class ArtistSetting
     public ArtistMatchType MatchType { get; set; } = ArtistMatchType.Exact;
     public bool IsWatchEnabled { get; set; } = true;
     public bool CollectFullCatalog { get; set; }
+
+    /// <summary>
+    /// 初回の全作品収集で新規発見したCDを未チェックとして扱うかを示す
+    /// </summary>
+    public bool ReviewInitialCatalogItems { get; set; }
+
+    /// <summary>
+    /// 全作品収集の初回正常取得が完了済みかを示す
+    /// </summary>
+    /// <remarks>
+    /// Catalogが0件だった場合でも初回完了を判定できるよう、Catalog relationの有無とは別に保持する。
+    /// </remarks>
+    public bool InitialCatalogCollectionCompleted { get; set; }
+
     public bool IsArchived { get; set; }
     public List<DiscArtistMatch> DiscMatches { get; } = [];
     public List<DiscArtistCatalog> CatalogEntries { get; } = [];

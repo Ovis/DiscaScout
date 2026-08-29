@@ -14,25 +14,18 @@ public sealed class ArtistCatalogStore(DiscaScoutDbContext dbContext, TimeProvid
     /// <summary>
     /// 全作品収集対象のアーティスト設定を取得する
     /// </summary>
-    /// <param name="artistSettingId">取得対象のArtistSetting ID</param>
-    /// <param name="cancellationToken">DBアクセスを中断するためのトークン</param>
-    /// <returns>存在する場合は設定、存在しない場合はnull</returns>
-    public Task<ArtistSetting?> FindSettingAsync(
-        long artistSettingId,
-        CancellationToken cancellationToken = default)
+    public Task<ArtistSetting?> FindSettingAsync(long artistSettingId, CancellationToken cancellationToken = default)
     {
-        return dbContext.ArtistSettings
-            .AsNoTracking()
-            .SingleOrDefaultAsync(x => x.Id == artistSettingId, cancellationToken);
+        return dbContext.ArtistSettings.AsNoTracking().SingleOrDefaultAsync(x => x.Id == artistSettingId, cancellationToken);
     }
 
     /// <summary>
     /// 正常取得済みのアーティスト検索結果を専用Catalog関係へ反映する
     /// </summary>
     /// <remarks>
-    /// DISCASのアーティスト検索は作曲・参加作品など対象Artist以外の商品も返し得るため、
-    /// 検索結果全体をそのまま採用せずArtistSettingのExact/Contains条件で後段フィルタする。
-    /// Catalog単独で初めて発見したCDはInboxへ出さず、通常New/Upcomingに現れた時点で初めてNEW扱いとする。
+    /// 初回取得をレビュー対象にする設定でも、既に通常取得などで存在するCDはここでは再オープンしない。
+    /// 設定追加時点で存在するCDの再確認はArtist Watch設定のプレビューで別途選択できるため、
+    /// この設定は初回Catalog取得によって新規作成されたCDだけを対象とする。
     /// </remarks>
     public async Task<ArtistCatalogApplyResult> ApplyAsync(
         long artistSettingId,
@@ -41,14 +34,15 @@ public sealed class ArtistCatalogStore(DiscaScoutDbContext dbContext, TimeProvid
     {
         ArgumentNullException.ThrowIfNull(snapshot);
 
-        var setting = await dbContext.ArtistSettings
-            .SingleAsync(x => x.Id == artistSettingId, cancellationToken);
+        var setting = await dbContext.ArtistSettings.SingleAsync(x => x.Id == artistSettingId, cancellationToken);
         if (setting.IsArchived || !setting.CollectFullCatalog)
         {
             throw new InvalidOperationException("全作品収集が有効なArtistSettingではない");
         }
 
         var now = clock.GetUtcNow().UtcDateTime;
+        var isInitialCollection = !setting.InitialCatalogCollectionCompleted;
+        var reviewInitialItems = isInitialCollection && setting.ReviewInitialCatalogItems;
         await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
         var discs = await dbContext.Discs
@@ -77,23 +71,19 @@ public sealed class ArtistCatalogStore(DiscaScoutDbContext dbContext, TimeProvid
             matchedCount++;
             if (!byDiscasId.TryGetValue(scraped.DiscasId, out var disc))
             {
-                disc = CreateCatalogOnlyDisc(scraped, now);
+                disc = CreateCatalogOnlyDisc(scraped, now, reviewInitialItems);
                 dbContext.Discs.Add(disc);
                 discs.Add(disc);
                 byDiscasId.Add(disc.DiscasId, disc);
                 addedDiscCount++;
 
                 // IDはSaveChangesまで確定しないため、新規DiscのCatalog relationはnavigation経由で追加する。
-                var relation = CreateRelation(setting, now);
-                disc.ArtistCatalogEntries.Add(relation);
+                disc.ArtistCatalogEntries.Add(CreateRelation(setting, now));
                 activatedCount++;
                 continue;
             }
 
             seenDiscIds.Add(disc.Id);
-
-            // Catalogだけで保持しているCDは再取得時に表示情報を更新する。
-            // 通常カテゴリで観測済みのCDはInbox差分判定をCatalog取得で先食いしないよう更新しない。
             if (disc.Sources.Count == 0)
             {
                 ApplyCatalogMetadata(disc, scraped, now);
@@ -124,20 +114,17 @@ public sealed class ArtistCatalogStore(DiscaScoutDbContext dbContext, TimeProvid
             deactivatedCount++;
         }
 
+        // 0件の正常取得でも「初回」は完了しているため、relation数ではなく明示的な状態として記録する。
+        setting.InitialCatalogCollectionCompleted = true;
         await dbContext.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
-        return new ArtistCatalogApplyResult(
-            snapshot.TotalCount,
-            matchedCount,
-            addedDiscCount,
-            activatedCount,
-            deactivatedCount);
+        return new ArtistCatalogApplyResult(snapshot.TotalCount, matchedCount, addedDiscCount, activatedCount, deactivatedCount);
     }
 
-    private static Disc CreateCatalogOnlyDisc(ScrapedDisc scraped, DateTime now)
+    private static Disc CreateCatalogOnlyDisc(ScrapedDisc scraped, DateTime now, bool needsReview)
     {
-        return new Disc
+        var disc = new Disc
         {
             DiscasId = scraped.DiscasId,
             ProductUrl = scraped.ProductUrl,
@@ -155,8 +142,20 @@ public sealed class ArtistCatalogStore(DiscaScoutDbContext dbContext, TimeProvid
             LastSeenAt = now,
             LastUpdatedAt = now,
             IsArchived = true,
-            NeedsReview = false
+            NeedsReview = needsReview
         };
+
+        if (needsReview)
+        {
+            // Catalog初回取得もArtist設定によってレビュー対象になったことを既存の理由種別で表現する。
+            disc.ReviewReasons.Add(new DiscReviewReason
+            {
+                Reason = DiscReviewReasonType.ArtistMatched,
+                CreatedAt = now
+            });
+        }
+
+        return disc;
     }
 
     private static DiscArtistCatalog CreateRelation(ArtistSetting setting, DateTime now)
@@ -182,14 +181,7 @@ public sealed class ArtistCatalogStore(DiscaScoutDbContext dbContext, TimeProvid
         disc.GenreSmall = scraped.GenreSmall;
         disc.ImageUrl = scraped.ImageUrl;
         disc.IsMaxiSingle = scraped.IsMaxiSingle;
-
-        // Artist Catalogの検索一覧でもレンタル開始日は取得できないため、
-        // 詳細ページから補完済みの値をnullで消さない。
-        if (scraped.RentalStartDate is not null)
-        {
-            disc.RentalStartDate = scraped.RentalStartDate;
-        }
-
+        if (scraped.RentalStartDate is not null) disc.RentalStartDate = scraped.RentalStartDate;
         disc.LastSeenAt = now;
         disc.LastUpdatedAt = now;
     }
@@ -198,11 +190,6 @@ public sealed class ArtistCatalogStore(DiscaScoutDbContext dbContext, TimeProvid
 /// <summary>
 /// Artist全作品スナップショットの反映結果を保持する
 /// </summary>
-/// <param name="SearchResultCount">DISCAS検索結果全体の件数</param>
-/// <param name="MatchedCount">ArtistSetting条件で後段フィルタ後に採用した件数</param>
-/// <param name="AddedDiscCount">Catalog専用CDとして新規作成した件数</param>
-/// <param name="ActivatedCount">新規または再有効化したCatalog関係数</param>
-/// <param name="DeactivatedCount">今回の正常取得で消失しInactiveへ移したCatalog関係数</param>
 public sealed record ArtistCatalogApplyResult(
     int SearchResultCount,
     int MatchedCount,

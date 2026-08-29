@@ -61,8 +61,10 @@ public sealed class DiscsModel(DiscaScoutDbContext dbContext) : PageModel
     public async Task OnGetAsync(CancellationToken cancellationToken)
     {
         NormalizeInputs();
-        UncheckedCount = await dbContext.Discs.CountAsync(x => x.NeedsReview && !x.IsRented && !x.IsArchived, cancellationToken);
-        PickupCount = await dbContext.Discs.CountAsync(x => x.ArtistMatches.Any(m => m.IsCurrentMatch && !m.ArtistSetting.IsArchived && m.ArtistSetting.IsWatchEnabled), cancellationToken);
+        UncheckedCount = await dbContext.Discs.CountAsync(IsUnchecked(), cancellationToken);
+        PickupCount = await dbContext.Discs.CountAsync(
+            x => x.ArtistMatches.Any(m => m.IsCurrentMatch && !m.ArtistSetting.IsArchived && m.ArtistSetting.IsWatchEnabled),
+            cancellationToken);
         GenreGroups = await LoadGenreGroupsAsync(cancellationToken);
 
         var query = dbContext.Discs
@@ -200,8 +202,18 @@ public sealed class DiscsModel(DiscaScoutDbContext dbContext) : PageModel
         "pickup" => query.Where(x => x.ArtistMatches.Any(m => m.IsCurrentMatch && !m.ArtistSetting.IsArchived && m.ArtistSetting.IsWatchEnabled)),
         "all" when HasSearchFilters() => query,
         "all" => query.Where(x => !x.IsArchived),
-        _ => query.Where(x => x.NeedsReview && !x.IsRented && !x.IsArchived)
+        _ => query.Where(IsUnchecked())
     };
+
+    /// <summary>
+    /// 未チェック一覧へ表示する条件を返す
+    /// </summary>
+    /// <remarks>
+    /// Catalog単独CDは通常カテゴリのSourceを持たないためIsArchived=trueだが、初回Catalog取得をレビュー対象にした場合は
+    /// ActiveなCatalog関係がある間だけ未チェック一覧へ表示する。通常カテゴリのアーカイブ判定自体は変更しない。
+    /// </remarks>
+    private static System.Linq.Expressions.Expression<Func<Disc, bool>> IsUnchecked() =>
+        x => x.NeedsReview && !x.IsRented && (!x.IsArchived || x.ArtistCatalogEntries.Any(c => c.IsActive));
 
     private IQueryable<Disc> ApplySearch(IQueryable<Disc> query)
     {
@@ -242,7 +254,6 @@ public sealed class DiscsModel(DiscaScoutDbContext dbContext) : PageModel
 
     private IQueryable<Disc> ApplySort(IQueryable<Disc> query) => Sort switch
     {
-        // 詳細情報未取得CDでも検索結果順位が自然な順序になるよう、レンタル開始日がない場合だけSourceRankを使う。
         "rental" => query.OrderByDescending(x => x.RentalStartDate.HasValue)
             .ThenByDescending(x => x.RentalStartDate)
             .ThenBy(x => x.Sources.Where(s => s.IsActive).Select(s => (int?)s.SourceRank).Min() ?? int.MaxValue)
@@ -256,8 +267,7 @@ public sealed class DiscsModel(DiscaScoutDbContext dbContext) : PageModel
     {
         // GenreLarge/Middle/Smallは独立したマスタではなくCDに付随して観測されるため、
         // 実データ上の組み合わせから親子関係を復元し、存在しない階層を推測しない。
-        var genres = await dbContext.Discs
-            .AsNoTracking()
+        var genres = await dbContext.Discs.AsNoTracking()
             .Select(x => new { x.GenreLarge, x.GenreMiddle, x.GenreSmall })
             .Distinct()
             .ToListAsync(cancellationToken);
@@ -267,14 +277,12 @@ public sealed class DiscsModel(DiscaScoutDbContext dbContext) : PageModel
             .OrderBy(x => x.Key, StringComparer.Ordinal)
             .Select(largeGroup => new GenreGroup(
                 largeGroup.Key,
-                largeGroup
-                    .Where(x => !string.IsNullOrWhiteSpace(x.GenreMiddle))
+                largeGroup.Where(x => !string.IsNullOrWhiteSpace(x.GenreMiddle))
                     .GroupBy(x => x.GenreMiddle!, StringComparer.Ordinal)
                     .OrderBy(x => x.Key, StringComparer.Ordinal)
                     .Select(middleGroup => new GenreMiddleGroup(
                         middleGroup.Key,
-                        middleGroup
-                            .Where(x => !string.IsNullOrWhiteSpace(x.GenreSmall))
+                        middleGroup.Where(x => !string.IsNullOrWhiteSpace(x.GenreSmall))
                             .Select(x => x.GenreSmall!)
                             .Distinct(StringComparer.Ordinal)
                             .OrderBy(x => x, StringComparer.Ordinal)
@@ -286,10 +294,7 @@ public sealed class DiscsModel(DiscaScoutDbContext dbContext) : PageModel
     private void SetUndoPayload(Disc disc)
     {
         UndoPayload = JsonSerializer.Serialize(new ReviewUndoState(
-            disc.Id,
-            disc.IsRented,
-            disc.NeedsReview,
-            disc.LastReviewedAt,
+            disc.Id, disc.IsRented, disc.NeedsReview, disc.LastReviewedAt,
             disc.ReviewReasons.Select(x => new ReviewReasonUndoState(x.Reason, x.CreatedAt)).ToArray()));
     }
 
@@ -312,13 +317,7 @@ public sealed class DiscsModel(DiscaScoutDbContext dbContext) : PageModel
 
     private static string BuildListUrl(string tab, string? title, string? artist, string? genre, bool excludeMaxi, bool excludeAlbum, string rental, string sort, int size, int page)
     {
-        var values = new Dictionary<string, string>
-        {
-            ["tab"] = tab,
-            ["rental"] = rental,
-            ["sort"] = sort,
-            ["size"] = size.ToString()
-        };
+        var values = new Dictionary<string, string> { ["tab"] = tab, ["rental"] = rental, ["sort"] = sort, ["size"] = size.ToString() };
         if (!string.IsNullOrWhiteSpace(title)) values["title"] = title;
         if (!string.IsNullOrWhiteSpace(artist)) values["artist"] = artist;
         if (!string.IsNullOrWhiteSpace(genre)) values["genre"] = genre;
@@ -328,14 +327,10 @@ public sealed class DiscsModel(DiscaScoutDbContext dbContext) : PageModel
         return QueryHelpers.AddQueryString("/discs", values);
     }
 
-    /// <summary>
-    /// 一覧のジャンル選択肢で表示する大ジャンルと、その配下の中ジャンルを表す
-    /// </summary>
+    /// <summary>一覧のジャンル選択肢で表示する大ジャンルと、その配下の中ジャンルを表す</summary>
     public sealed record GenreGroup(string Name, IReadOnlyList<GenreMiddleGroup> MiddleGenres);
 
-    /// <summary>
-    /// 一覧のジャンル選択肢で表示する中ジャンルと、その配下の小ジャンルを表す
-    /// </summary>
+    /// <summary>一覧のジャンル選択肢で表示する中ジャンルと、その配下の小ジャンルを表す</summary>
     public sealed record GenreMiddleGroup(string Name, IReadOnlyList<string> SmallGenres);
 
     private sealed record ReviewUndoState(long DiscId, bool IsRented, bool NeedsReview, DateTime? LastReviewedAt, IReadOnlyList<ReviewReasonUndoState> Reasons);
