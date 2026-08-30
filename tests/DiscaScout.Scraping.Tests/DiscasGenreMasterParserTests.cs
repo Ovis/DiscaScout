@@ -37,6 +37,17 @@ public sealed class DiscasGenreMasterParserTests
                     </ul>
                   </div>
                 </div>
+                <div class="ppdis00033WrapB" style="display: none;">
+                  <div class="ppdis00033WrapC">
+                    <h2><a href="https://movie-tsutaya.tsite.jp/netdvd/cd/searchCd.do?g=0102e">オムニバス</a></h2>
+                  </div>
+                  <div class="ppdis00033OuterA">
+                    <ul class="ppdis00033ListA">
+                      <li><a href="https://movie-tsutaya.tsite.jp/netdvd/cd/searchCd.do?g=01023,01102">洋楽オムニバス</a></li>
+                      <li><a href="https://movie-tsutaya.tsite.jp/netdvd/cd/searchCd.do?g=01022,01101">邦楽オムニバス</a></li>
+                    </ul>
+                  </div>
+                </div>
               </div>
               <nav><a href="searchCd.do?g=99999">ヘッダー上の別リンク</a></nav>
             </body></html>
@@ -80,5 +91,7 @@ public sealed class DiscasGenreMasterParserTests
                 Assert.Equal("01004", genre.ParentExternalId);
                 Assert.Equal(0, genre.SortOrder);
             });
+
+        Assert.DoesNotContain(result, x => x.ExternalId is "0102e" or "01023,01102" or "01022,01101");
     }
 }
