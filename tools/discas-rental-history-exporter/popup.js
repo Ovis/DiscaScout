@@ -13,7 +13,8 @@ elements["debug-download"].addEventListener("click", () => downloadJson(buildDeb
 
 async function refresh() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    const onHistoryPage = /^https:\/\/www\.discas\.net\/netdvd\/dvd\/rentalLog\.do(?:[?#]|$)/.test(tab?.url ?? "");
+    // DISCASのレンタル履歴はwish配下にある。別のrentalLog.doを誤認しないようパスまで確認する。
+    const onHistoryPage = /^https:\/\/www\.discas\.net\/netdvd\/wish\/rentalLog\.do(?:[?#]|$)/.test(tab?.url ?? "");
     elements["page-warning"].hidden = onHistoryPage;
     snapshot = await chrome.runtime.sendMessage({ type: "get-state" });
     render(snapshot.state, snapshot.result, onHistoryPage);
