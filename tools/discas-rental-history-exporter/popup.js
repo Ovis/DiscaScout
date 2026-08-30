@@ -1,4 +1,4 @@
-const elements = Object.fromEntries(["page-warning","status","pages","rows","cd-rows","unique-cds","detail","start","resume","cancel","result","result-summary","copy","download","debug","debug-download"].map(id => [id, document.getElementById(id)]));
+const elements = Object.fromEntries(["page-warning","status","pages","rows","cd-rows","unique-cds","detail","start","resume","cancel","result","result-summary","copy","download","debug","debug-download","html-debug","html-debug-download"].map(id => [id, document.getElementById(id)]));
 let snapshot = null;
 
 await refresh();
@@ -10,6 +10,7 @@ elements.cancel.addEventListener("click", () => run("cancel"));
 elements.copy.addEventListener("click", async () => navigator.clipboard.writeText(JSON.stringify(snapshot.result.records, null, 2)));
 elements.download.addEventListener("click", () => downloadJson(snapshot.result.records, "discas-rental-history.json"));
 elements["debug-download"].addEventListener("click", () => downloadJson(buildDebug(snapshot.state), "discas-rental-history-diagnostic.json"));
+elements["html-debug-download"].addEventListener("click", downloadDebugHtml);
 
 async function refresh() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -17,7 +18,7 @@ async function refresh() {
     const onHistoryPage = /^https:\/\/www\.discas\.net\/netdvd\/wish\/rentalLog\.do(?:[?#]|$)/.test(tab?.url ?? "");
     elements["page-warning"].hidden = onHistoryPage;
     snapshot = await chrome.runtime.sendMessage({ type: "get-state" });
-    render(snapshot.state, snapshot.result, onHistoryPage);
+    render(snapshot.state, snapshot.result, onHistoryPage, snapshot.hasDebugHtml);
 }
 
 async function run(type) {
@@ -25,7 +26,7 @@ async function run(type) {
     await refresh();
 }
 
-function render(state, result, onHistoryPage) {
+function render(state, result, onHistoryPage, hasDebugHtml) {
     const active = state && ["running", "retrying"].includes(state.status);
     elements.start.disabled = !onHistoryPage || active;
     elements.start.hidden = state?.status === "cancelled";
@@ -42,6 +43,7 @@ function render(state, result, onHistoryPage) {
     elements.result.hidden = !result;
     if (result) elements["result-summary"].textContent = `${result.stats.expectedRows}件を検証 / CD履歴 ${result.stats.cdRows}件 / 重複排除後 ${result.stats.uniqueCds}作品 / 重複 ${result.stats.duplicateCdRows}件 / メタデータ不一致 ${result.metadataConflicts.length}作品`;
     elements.debug.hidden = state?.status !== "invalid";
+    elements["html-debug"].hidden = !hasDebugHtml;
 }
 
 function formatStatus(state) {
@@ -63,8 +65,20 @@ function buildDebug(state) {
     };
 }
 
+async function downloadDebugHtml() {
+    const response = await chrome.runtime.sendMessage({ type: "get-debug-html" });
+    if (!response?.debugHtml?.html) return;
+    const debug = response.debugHtml;
+    const header = `<!-- requestedUrl: ${debug.requestedUrl}\nresponseUrl: ${debug.responseUrl}\nfetchedAt: ${debug.fetchedAt}\npage: ${debug.page}\n-->\n`;
+    downloadText(header + debug.html, `discas-rental-history-page-${String(debug.page).padStart(3, "0")}.html`, "text/html");
+}
+
 function downloadJson(value, filename) {
-    const blob = new Blob([JSON.stringify(value, null, 2)], { type: "application/json" });
+    downloadText(JSON.stringify(value, null, 2), filename, "application/json");
+}
+
+function downloadText(value, filename, type) {
+    const blob = new Blob([value], { type });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
