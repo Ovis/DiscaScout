@@ -2,20 +2,20 @@
 
 最終更新: **2026-08-30**
 
-この文書は、新しい開発セッションで過去の会話ログを読み直さなくても DiscaScout の現在地を把握できるようにするための引き継ぎ資料です。詳細な設計理由は `architecture.md`、DISCAS HTML の調査結果は `discas-scraping.md`、アクセス負荷に関する必須制約は `scraping-policy.md` を参照してください。
+この文書は、新しい開発セッションで過去の会話ログを読み直さなくても DiscaScout の現在地を把握できるようにするための引き継ぎ資料です。詳細な設計理由は `architecture.md`、DISCAS HTML の調査結果は `discas-scraping.md`、ジャンルマスターは `genre-master.md`、アクセス負荷に関する必須制約は `scraping-policy.md` を参照してください。
 
 ## 1. プロジェクト概要
 
 DiscaScout は TSUTAYA DISCAS の CD「近日リリース」「新作」を定期取得し、ローカルで検索・確認・レンタル状態管理を行う単一ユーザー向け Web アプリケーションです。
 
-通常収集では DISCAS 全 CD をミラーせず、観測した近日リリース・新作を蓄積します。指定したアーティストについてのみ Artist Catalog として全作品検索を行えます。
+通常収集では DISCAS 全 CD をミラーせず、観測した近日リリース・新作を蓄積します。指定したアーティストについてのみ Artist Catalog として全作品検索を行えます。加えて、ログイン済み DISCAS のレンタル履歴をブラウザ拡張から JSON 化し、過去に借りた CD を取り込めます。
 
 主な技術:
 
-- ASP.NET Core / .NET 10
+- ASP.NET Core MVC / .NET 10
 - EF Core / SQLite
 - HttpClient + AngleSharp
-- Docker
+- Docker / Docker Compose
 - 単一 Web アプリケーション / 単一インスタンス
 - アプリ内 BackgroundService
 - アプリ自身には認証を持たせず、ネットワーク / Traefik 等でアクセス制御
@@ -29,6 +29,8 @@ DiscaScout は TSUTAYA DISCAS の CD「近日リリース」「新作」を定�
 - Docker image: `disca-scout`
 - SQLite: `discascout.db`
 
+`main` の現在の基準は **PR #40 `Add DISCAS genre master and normalized genre filtering` マージ後**です。
+
 ## 2. 実装済み機能
 
 ### 2.1 通常スクレイピング
@@ -40,7 +42,6 @@ DiscaScout は TSUTAYA DISCAS の CD「近日リリース」「新作」を定�
 - Windows-31J を CP932 として明示デコード
 - PC 向け `.cd-product-item` のみ解析
 - hidden `titleId` 列と解析結果の完全一致を検証
-- GA 用メタデータから GenreLarge / GenreMiddle / GenreSmall を追加 HTTP なしで取得
 - `【MAXI】` タイトル接頭辞から MAXI を判定
 
 2026-08-29 の実地確認では全ジャンルで:
@@ -50,13 +51,45 @@ DiscaScout は TSUTAYA DISCAS の CD「近日リリース」「新作」を定�
 
 を完全取得できています。
 
-### 2.2 差分・状態管理
+### 2.2 スクレイピング件数安全装置
+
+PR #26 で導入済みです。
+
+- **0件取得は常に異常**として DB へ反映しない
+- 同カテゴリの最後に DB 反映まで成功した `ScrapeRun` を正常基準とする
+- 今回件数が正常基準の **70%未満**なら `CountDrop` 異常
+- **70%ちょうどは正常**
+- PageCount は判定には使わず、履歴・通知・確認 UI の参考情報として保存
+- 異常として拒否した Run は次回の基準値にしない
+
+失敗分類:
+
+- `ScrapeFailureType.ProcessingError`
+- `ScrapeFailureType.AbnormalCount`
+  - `AbnormalCountReason.ZeroCount`
+  - `AbnormalCountReason.CountDrop`
+
+件数異常も通常の Retry フローへ接続します。
+
+- 通常失敗 → 3時間後 Retry #1
+- Retry #1 失敗 → 翌日 Retry #2
+- Retry #2 失敗 → それ以上自動再試行しない
+
+正当な大幅減少を確認した場合、`/settings` からカテゴリ別に「次回1回だけ急減を許可」できます。
+
+- 0件は Override 不可
+- Override は通信・解析失敗では消費しない
+- 完全スナップショットの DB 反映成功後にのみ消費
+- 有効化後は対象カテゴリだけ `CategoryScrape` ManualWork として即時 enqueue
+- Override 利用成功は `CountDropOverrideUsed=true` として履歴に残る
+
+### 2.3 差分・状態管理
 
 `Disc` を中心に次を永続化しています。
 
 - タイトル / アーティストと正規化値
-- ジャンル
-- 画像 URL / ローカル画像パス
+- 正規化ジャンル参照 `GenreId`
+- 画像 URL / ローカル画像パス / 詳細用画像 URL
 - レンタル開始日
 - MAXI / 2枚組
 - 詳細説明
@@ -69,6 +102,7 @@ DiscaScout は TSUTAYA DISCAS の CD「近日リリース」「新作」を定�
 - ReviewReason
 - メタデータ変更履歴
 - Artist Watch / Artist Catalog 関係
+- レンタル履歴インポート日時
 
 ReviewReason:
 
@@ -79,9 +113,29 @@ ReviewReason:
 
 通常カテゴリで 2 回連続して見えなくなった Source を inactive とし、active な通常 Source がなくなった Disc を Archive します。失敗したクロールでは MissingCount を進めません。
 
-レンタル済み Disc は新しい ReviewReason による Inbox 再オープンを抑止します。
+レンタル履歴由来 Disc は通常 Source がなくても保持します。レンタル済み Disc は新しい ReviewReason による Inbox 再オープンを抑止します。
 
-### 2.3 Artist Watch / Artist Catalog
+### 2.4 ジャンルマスター
+
+PR #40 で、Disc に大・中・小ジャンル文字列を直接持たせる方式を廃止しました。
+
+- DISCAS `genreAll.do` をジャンルマスターの正とする
+- `Genre` を自己参照ツリーとして保持
+- DISCAS の `G` パラメータを外部 ID として保存
+- `Disc.GenreId` は最深ジャンルノードを参照
+- マスター更新時に消えたジャンルは削除せず Inactive 化
+- 再出現時は Reactivate
+- 初回通常クロール前にジャンルマスターを準備
+- `/settings` から手動更新可能
+- ジャンルマスター更新にも安全装置があり、0件または既存 Active 件数の 75% 未満への急減は更新拒否
+
+検索結果と詳細ページのジャンルは同じ完全パス Resolver で解決します。詳細ページ側と検索結果側が異なる場合は詳細ページ側を採用し警告ログを残します。
+
+CD 一覧の大・中・小ジャンルフィルターは `GenreId` ベースです。親ジャンル選択時は子孫ジャンルを含めます。Inactive ジャンルでも既存 Disc が参照しているものはフィルターへ表示します。
+
+詳細は `genre-master.md` を参照してください。
+
+### 2.5 Artist Watch / Artist Catalog
 
 ArtistSetting:
 
@@ -108,7 +162,7 @@ Artist Catalog:
 - Catalog-only Disc は通常の `NEW` として Inbox に入れない
 - 後に通常カテゴリへ初登場した場合は `NEW`
 
-### 2.4 詳細ページと詳細メタデータ
+### 2.6 詳細ページと詳細メタデータ
 
 `/discs/{id}` を実装済みです。
 
@@ -135,10 +189,12 @@ Artist Catalog:
 
 詳細ページ HTML からバックグラウンドで取得:
 
-- `レンタル開始日：YYYY年MM月DD日`
-- `作品詳細` ～ `ジャンル` の説明
-- `曲目` ～ `記番` のトラック一覧
-- `tx_item_info03.png` の有無による 2 枚組判定
+- レンタル開始日
+- 作品詳細
+- 曲目
+- 2枚組判定
+- 詳細用ジャケット画像 URL
+- ジャンル
 
 `IsTwoDisc` は nullable で、null は「未確認」です。
 
@@ -146,21 +202,22 @@ Artist Catalog:
 
 - 未取得 Disc はバックグラウンド取得対象
 - 詳細ページを開くと優先キューへ入れるが Web リクエスト自体は待たない
+- レンタル履歴インポート由来で未取得の Disc は通常未取得 Disc より優先
 - 初回成功がレンタル開始前なら、レンタル開始日以降にもう一度取得
-- レンタル開始日以降の成功で `DetailRefreshCompleted=true` とし通常は終了
+- レンタル開始日以降の成功で `DetailRefreshCompleted=true`
 - 失敗後は最低 6 時間空ける
 - 通常スクレイピング / Artist Catalog 実行中は詳細取得を譲る
 - 詳細取得は 1 件ずつ、さらに約 15 秒間隔
 
-説明文は DB では原文を保持し、詳細画面の表示時だけ `。` の後に改行を入れます。
+`/operations` では詳細補完進捗として、未完了総数、現在取得可能、失敗後6時間待機、レンタル開始待ち等を表示します。
 
-### 2.5 画像キャッシュ
+### 2.7 画像キャッシュ
 
 画像は通常スクレイピング完了条件から分離されています。
 
-- DB の ImageUrl / ImagePath 状態を暗黙の durable queue として使用
-- 専用 `ImageCacheBackgroundService`
-- 1 pass 開始時に pending ID の snapshot を作り、失敗した先頭画像が後続を飢餓させない
+- DB の ImageUrl / ImagePath 状態を durable queue 相当として利用
+- 専用 `DiscImageCacheBackgroundService`
+- 1 pass 開始時に pending ID の snapshot を作成
 - 40 IDs / batch
 - 最大 4 HTTP concurrent
 - batch 間 2 秒
@@ -170,7 +227,9 @@ Artist Catalog:
 - 取得失敗時は旧画像を保持
 - 画像失敗はスクレイピング成功・失敗に影響させない
 
-### 2.6 Scheduler / Retry / ManualWork
+レンタル履歴由来 Disc の詳細ページから得た MX ジャケット URL は詳細画面用に保持し、一覧キャッシュには対応する SX URL を使用します。
+
+### 2.8 Scheduler / Retry / ManualWork
 
 通常 schedule:
 
@@ -179,18 +238,10 @@ Artist Catalog:
 - 初期値 disabled / Sunday 04:00
 - 同日 catch-up
 
-Retry:
-
-- 通常失敗: +3 時間
-- Retry #1 失敗: +1 日
-- Retry #2 失敗: それ以上自動再試行しない
-- Scheduled / Manual 成功時は該当カテゴリの pending retry を cancel
-
 ManualWork:
 
 - SQLite に Pending / Running / Completed / Failed を永続化
-- `FullScrape` / `ArtistCatalog`
-- PR #26 では急減許可後の対象カテゴリだけを再取得する `CategoryScrape` を追加
+- `FullScrape` / `ArtistCatalog` / `CategoryScrape`
 - Web 操作は enqueue して即応答
 - BackgroundService が manual → due retry → scheduled の優先順で処理
 - 起動時に中断された Running を Pending へ戻す
@@ -199,7 +250,7 @@ ManualWork:
 
 永続化する timestamp は SQLite で比較・ORDER BY 可能にするため **UTC DateTime**。UI では JST に変換します。
 
-### 2.7 Discord 通知
+### 2.9 Discord 通知
 
 `/settings` から設定します。環境変数を正とはしません。
 
@@ -217,62 +268,52 @@ SQLite に保存:
 - 失敗時の次回 Retry 予定
 - Artist Catalog の手動取得失敗
 
-画像キャッシュや個別詳細取得失敗は Discord 通知しません。
+成功通知には PR #27 以降、**その取得で新たに Artist Watch へ一致した CD 件数**も含みます。同じ CD が複数 Watch に一致しても 1 件として集計します。
 
-Webhook 送信失敗はログ警告に留め、本体の取得結果や Retry 制御へ波及させません。
+画像キャッシュや個別詳細取得失敗は Discord 通知しません。Webhook 送信失敗はログ警告に留め、本体の取得結果や Retry 制御へ波及させません。
 
-設定画面から保存済み Webhook へテスト通知を送信できます。テスト通知は `Off` でも明示操作として送信可能です。
+### 2.10 レンタル履歴インポート
 
-PR #26 では件数異常時の通知に、前回正常件数・今回件数・比率・70%閾値・ページ数（参考）・次回 Retry を表示するよう変更しています。
+PR #31 以降で実装済みです。
 
-現状、成功通知には Artist Watch 新規一致件数を独立集計して含めていません。
+`/operations` から、次形式の JSON をインポートできます。
 
-### 2.8 スクレイピング件数安全装置（PR #26、未マージ）
+```json
+[
+  {
+    "titleId": "0000102452",
+    "title": "断絶",
+    "artist": "井上陽水"
+  }
+]
+```
 
-DISCAS 側の HTML 変更や一時的な異常により、完全性検証をすり抜けた不自然に小さいスナップショットを DB へ反映しないための防御です。
+- `titleId` 単位で冪等
+- 既存 Disc は重複作成しない
+- 取り込んだ Disc を `IsRented=true` / `NeedsReview=false` にする
+- 履歴にしか存在しない CD も新規 Disc として作成
+- `RentalHistoryImportedAt` で provenance を保持
+- 後から通常クロールで同じ titleID が見つかれば既存 Disc へ Source と正式メタデータを追加
+- 未取得 Disc は詳細取得優先対象
 
-判定:
+レンタル履歴 JSON を作るため、`tools/discas-rental-history-exporter/` に Chrome Manifest V3 拡張があります。
 
-- **0件取得は常に異常**。初回取得でも受け入れない
-- 同カテゴリの「最後に DB 反映まで成功した `ScrapeRun`」を正常基準とする
-- 今回件数が正常基準の **70%未満** なら `CountDrop` 異常
-- **70%ちょうどは正常**
-- 判定は整数演算 `current * 100 < previous * 70` で行う
-- 過去の正常 Run がない場合は、0件でなければ最初の正常基準として受け入れる
-- PageCount は異常判定には使わず、履歴・通知・確認 UI の参考情報として記録する
-- 異常として拒否した Run は次回の基準値にしない
+拡張の主な仕様:
 
-失敗分類:
-
-- `ScrapeFailureType.ProcessingError`
-- `ScrapeFailureType.AbnormalCount`
-  - `AbnormalCountReason.ZeroCount`
-  - `AbnormalCountReason.CountDrop`
-
-件数異常は通常失敗と同様に既存 Retry へ流します。
-
-- 通常失敗 → 3時間後 Retry #1
-- Retry #1 も異常 → 翌日 Retry #2
-- Retry #2 も異常 → 自動 Retry 終了
-- Retry だから閾値を緩めたり、同じ異常値が続いたから自動承認したりしない
-
-正当な大幅減少を人間が確認した場合:
-
-- `/settings` で Upcoming / New ごとに「次回1回だけ急減を許可」できる
-- 確認画面にカテゴリ、正常基準件数・ページ数、直近異常件数・ページ数・発生日時を表示
-- Override は **70%未満の急減だけ**を許可し、0件は常に拒否
-- Override は SQLite の `ScrapeGuardSettings` にカテゴリ別で永続化
-- 有効日時も保存・表示
-- 未消費なら手動取消可能
-- 許可確定後は対象カテゴリだけを `CategoryScrape` ManualWork へ即時 enqueue
-- 通信・解析・DB反映失敗では Override を消費しない
-- 完全スナップショットの DB 反映成功後にだけ Override を消費する
-- Override を使って成功した Run は `CountDropOverrideUsed=true` として履歴に残す
-- 成功すればそのカテゴリの既存 Pending Retry は通常どおり cancel する
-
-この機能は既存の `DiscasRequestThrottle` や HTML アクセス直列化を変更しません。
+- ログイン済み DISCAS レンタル履歴ページから開始
+- 総件数・総ページ数を動的取得
+- 全ページを直列取得
+- 最低 2 秒間隔、10 ページごとに 5～20 秒追加待機
+- 失敗時は 10秒 → 30秒 → 60秒で最大3回 Retry
+- `chrome.storage.local` へページ単位の進捗を保存
+- CD 行だけ抽出
+- 全履歴行数と DISCAS 表示総件数で完全性検証
+- 最終 JSON は `titleId` で重複排除
+- Cookie / 認証情報は保存・出力しない
 
 ## 3. Web UI の現在地
+
+PR #28 で Razor Pages から **ASP.NET Core MVC（Controller + Razor View）** へ移行済みです。GET URL は維持しています。
 
 共通ナビゲーション:
 
@@ -283,12 +324,14 @@ DISCAS 側の HTML 変更や一時的な異常により、完全性検証をす�
 
 `/discs`:
 
-- タブ: 未チェック / Pickup / 全件
+- タブ: 未チェック / Pickup / レンタル済み / 全件
+- 未チェック専用フィルター: すべて / 近日リリース / 新着 / Artist Watch
 - タイトル検索とアーティスト検索を独立
+- タイトル検索は任意で「作品詳細」「曲目」も対象にできる
 - 各検索は空白区切り AND
-- ジャンル exact filter（large / middle / small）
+- 大 / 中 / 小ジャンルの階層フィルター
 - アーティスト・ジャンル表示をクリックしてフィルター化
-- MAXI / Album 除外
+- MAXI / Album 除外は折りたたみの形式フィルター
 - レンタル状態 filter
 - sort: updated / rental / title / artist
 - 50 / 100 / 200 件、page size は localStorage
@@ -298,10 +341,11 @@ DISCAS 側の HTML 変更や一時的な異常により、完全性検証をす�
 - 近日リリース / 新作 / 準新作 / 旧作 badge
 - MAXI / 2枚組 / 借りた / Archive / Pickup badge
 - 現在ページの未チェックを一括確認済み
-- 未レンタル CD をチェックボックスで複数選択し一括「借りた」
+- 未レンタル CD を複数選択し一括「借りた」
 - 個別 Reviewed / Rented の直前 1 操作を Undo
 - タイトルからローカル詳細へ遷移
 - DISCAS への外部リンク
+- ページ番号を直接選択できるページャー。現在ページ前後2ページ、先頭・末尾、`…` を表示
 
 DISCAS CD レンタル区分は現在日付と RentalStartDate から動的計算し、DB に固定保存しません。
 
@@ -310,13 +354,26 @@ DISCAS CD レンタル区分は現在日付と RentalStartDate から動的計�
 - 91～180 日: 準新作
 - 181 日～: 旧作
 
-PR #26 では `/settings` に件数安全装置の状態・急減許可 UI、`/operations` に PageCount・失敗分類・Override 使用履歴表示を追加しています。
+`/operations`:
+
+- 手動スクレイピング
+- ManualWork 状態 / 履歴
+- ScrapeRun 履歴
+- 詳細メタデータ補完進捗
+- レンタル履歴 JSON インポート
+
+`/settings`:
+
+- Schedule
+- Discord Webhook / 通知モード / テスト通知
+- 通常スクレイピング件数安全装置 / Override
+- ジャンルマスター状態 / 手動更新
 
 ## 4. 最重要: DISCAS アクセス負荷制御
 
 この制約は今後の実装でも維持してください。高速化を理由に安易に緩和しません。
 
-検索 HTML / Artist Catalog / 詳細 HTML は共有 `DiscasRequestThrottle` を通します。
+検索 HTML / Artist Catalog / 詳細 HTML / ジャンルマスター取得は共有 `DiscasRequestThrottle` の方針下で扱います。
 
 - DISCAS HTML HTTP は **全体で直列**
 - request start は最低 **2 秒**間隔
@@ -332,7 +389,9 @@ PR #26 では `/settings` に件数安全装置の状態・急減許可 UI、`/o
 - batch 間 2 秒
 - 10 batch ごとに 5～20 秒追加待機
 
-検索結果 HTML だけで取得できる情報のために detail page を追加取得しないことも原則です。
+検索結果 HTML や既存のマスターで取得できる情報のために detail page を追加取得しないことも原則です。
+
+レンタル履歴 exporter もログイン済みブラウザから DISCAS へアクセスするため、同様に直列・最低2秒・10ページごとの追加待機を守ります。
 
 ## 5. 重要なドメイン仕様
 
@@ -368,32 +427,54 @@ Rented:
 
 Artist Catalog membership は通常 Source / Archive lifecycle と独立です。Catalog-only Disc は Archive 相当でも Pickup に表示し得ます。
 
-## 6. 未実装・今後の候補
+### Rental history と通常 Source
 
-主要なバックエンドと日常操作 UI はかなり揃っています。
+レンタル履歴由来 Disc は通常 Source がなくても消しません。後から通常クロールで同じ titleID を観測した場合は同じ Disc へ統合します。
 
-現在の最優先:
+### Genre
 
-- **PR #26 `Add scrape count anomaly guard` の CI / レビュー / マージ確認**
+ジャンル文字列を Disc に直接保存する設計は廃止済みです。`Genre` マスターを正とし、`Disc.GenreId` から階層を解決します。
 
-その後の候補:
+## 6. 配置 / Docker
 
-- Discord 成功通知へ Artist Watch 新規一致件数を含めるか検討
-- UI の最終的な見た目・操作性調整
-- 必要に応じて運用テスト・E2E の追加
+PR #36 で Docker Compose 運用構成を追加済みです。
+
+- .NET 10 multi-stage `Dockerfile`
+- `compose.yaml`
+- ホスト 8080 → コンテナ Web
+- `restart: unless-stopped`
+- `TZ=Asia/Tokyo`
+- `/health` ヘルスチェック
+- リポジトリ直下 `./data` を `/app/data` へ bind mount
+  - `data/discascout.db`
+  - `data/images/`
+
+実環境で `docker compose up -d --build` による起動確認済みです。
+
+## 7. 未実装・今後の候補
+
+主要なバックエンドと日常操作 UI、レンタル履歴取込、Docker 配置まで揃っています。
+
+現時点で「次に必ず実装する」と確定している大きな機能はありません。今後の候補は:
+
+- 実運用での UI / 操作性の最終調整
+- 長期運用で判明したスクレイピング・ジャンル解決の例外対応
+- 必要に応じた運用テスト / E2E の追加
+- レンタル履歴 exporter の実サイト変化への追従
 - ドキュメントと実装の継続同期
 
-レンタル履歴の DISCAS ログイン連携は意図的に後回しです。将来は PC ブラウザで履歴を取得し、CSV 化してインポートする方式を候補としています。ログインセッションを DiscaScout の scraper に持たせる設計は現時点で採用していません。
+DISCAS のログインセッションを DiscaScout 本体 scraper に持たせる設計は採用していません。認証が必要なレンタル履歴取得はブラウザ拡張側に分離します。
 
-## 7. Git / 開発運用上の注意
+## 8. Git / 開発運用上の注意
 
 - `main` はアプリケーションコード
 - `docs` は設計・調査資料専用の orphan branch
 - 機能変更は原則 feature branch → PR → CI → ユーザーが確認して merge
 - **`docs` branch のドキュメント更新は PR 不要で直接 commit してよい**
 - ユーザーから明示されない限り PR を勝手に merge しない
-- GitHub へファイルを書き込む前に必ず対象 branch を作成・確認し、write API には branch を明示する
-- 過去に誤って `main` へ直接 commit した事故があったため、default branch への暗黙書き込みは禁止
+- GitHub へファイルを書き込む前に対象 branch を確認し、write API には branch を明示する
+- default branch への暗黙書き込みは禁止
+- CI は PR 番号 / ref 単位の concurrency を持ち、新しい実行開始時に同一グループの古い実行を cancel する
 
 コードコメント方針:
 
@@ -402,18 +483,22 @@ Artist Catalog membership は通常 Source / Archive lifecycle と独立です�
 - 新規 / 変更 class と主要 public / internal method には原則日本語 XML documentation
 - 順序、互換性、安全性、負荷制御、retry、concurrency 等の設計意図は積極的にコメントする
 
-## 8. 最近の主要 PR
+## 9. 最近の主要 PR
 
-- #15 UTC DateTime 化
-- #16 ManualWork のバックグラウンド化
-- #17 DISCAS 負荷制御強化・画像キャッシュ非同期化
-- #18 CD 詳細ページ
-- #19 詳細メタデータの低頻度バックグラウンド取得
-- #20 CD 一覧の検索・Review UI 改善
-- #21 Artist Watch 設定プレビュー
-- #22 Discord scrape notifications
-- #23 Discord test notification
-- #24 複数 CD の一括「借りた」操作
-- #26 scrape count anomaly guard — **open / 未マージ**
+- #26 scrape count anomaly guard — **merged**
+- #27 Artist Watch 新規一致件数を成功通知へ追加 — **merged**
+- #28 Razor Pages → ASP.NET Core MVC — **merged**
+- #29 詳細取得進捗を運用画面へ追加 — **merged**
+- #30 タイトル検索を作品詳細・曲目へ拡張 — **merged**
+- #31 DISCAS レンタル履歴インポート — **merged**
+- #32 CI の superseded run 自動キャンセル — **merged**
+- #33 詳細 Razor View 整形 — **merged**
+- #34 レンタル履歴 exporter Chrome 拡張 — **merged**
+- #35 レンタル済みタブ / 未チェック分類フィルター — **merged**
+- #36 Docker deployment configuration — **merged**
+- #37 CD 一覧ページャー改善 — **merged**
+- #38 レンタル履歴由来 Disc の詳細ジャンル補完 — **merged**
+- #39 detail genre parser 修正 — close / **未マージ**。後続 #40 のジャンルマスター実装で問題領域を再設計
+- #40 DISCAS genre master / normalized genre filtering — **merged**
 
-**#24 まで main へ merge 済み**です。#26 は feature branch `feature/scrape-count-anomaly-guard` から main への PR として確認中です。
+現在の `main` は **#40 まで反映済み**です。
