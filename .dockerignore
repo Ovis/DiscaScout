@@ -1,0 +1,12 @@
+.git
+.github
+.vs
+**/bin
+**/obj
+**/data
+data
+*.user
+*.suo
+*.db
+*.db-shm
+*.db-wal
