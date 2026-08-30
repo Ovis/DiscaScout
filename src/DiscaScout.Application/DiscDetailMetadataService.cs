@@ -156,7 +156,10 @@ public sealed partial class DiscDetailMetadataService(
             disc.DetailImageUrl = detail.DetailImageUrl;
             if (!string.IsNullOrWhiteSpace(detail.DetailImageUrl)) disc.ImageUrl = ToSmallJacketUrl(detail.DetailImageUrl);
             disc.DetailFetchedAt = fetchedAt;
-            disc.DetailRefreshCompleted = detail.RentalStartDate <= today;
+
+            // 詳細ページ自体を正常に取得できたにもかかわらずレンタル開始日が存在しない場合は終端状態とする。
+            // サイト側の一時的な表示異常が疑われる場合は、詳細画面の手動再取得で明示的にやり直せる。
+            disc.DetailRefreshCompleted = detail.RentalStartDate is null || detail.RentalStartDate <= today;
 
             dbContext.DiscTracks.RemoveRange(disc.Tracks);
             disc.Tracks.Clear();
