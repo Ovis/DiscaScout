@@ -1,12 +1,9 @@
-using System.Web;
 using AngleSharp.Dom;
 using AngleSharp.Html.Parser;
 
 namespace DiscaScout.Scraping;
 
-/// <summary>
-/// DISCASの「すべてのジャンル」ページからジャンル階層と外部IDを抽出する
-/// </summary>
+/// <summary>DISCASの「すべてのジャンル」ページからジャンル階層と外部IDを抽出する</summary>
 public sealed class DiscasGenreMasterParser
 {
     private readonly HtmlParser parser = new();
@@ -18,37 +15,23 @@ public sealed class DiscasGenreMasterParser
         var document = parser.ParseDocument(html);
         var result = new List<ScrapedGenre>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
-
         foreach (var anchor in document.QuerySelectorAll("a[href]"))
         {
             var externalId = GetGenreId(anchor.GetAttribute("href"));
             var name = Normalize(anchor.TextContent);
             if (externalId is null || name is null || name == "すべてのジャンル" || !seen.Add(externalId)) continue;
-
-            // genreAll.doは階層を入れ子のリストとして表現している。親li直下のジャンルリンクを
-            // 親ノードとして採用し、表示名が同じノードでも外部IDで区別する。
-            var parentExternalId = FindParentGenreId(anchor);
-            var siblingAnchors = anchor.ParentElement?.ParentElement?.Children
-                .SelectMany(x => x.QuerySelectorAll(":scope > a[href]"))
-                .Where(x => GetGenreId(x.GetAttribute("href")) is not null)
-                .ToArray() ?? [];
-            var sortOrder = Array.IndexOf(siblingAnchors, anchor);
-            result.Add(new ScrapedGenre(externalId, name, parentExternalId, sortOrder < 0 ? result.Count : sortOrder));
+            result.Add(new ScrapedGenre(externalId, name, FindParentGenreId(anchor), result.Count));
         }
-
         return result;
     }
 
     private static string? FindParentGenreId(IElement anchor)
     {
-        var li = anchor.Closest("li");
-        var parentLi = li?.ParentElement?.Closest("li");
+        var parentLi = anchor.Closest("li")?.ParentElement?.Closest("li");
         if (parentLi is null) return null;
         foreach (var child in parentLi.Children)
         {
-            if (child.LocalName != "a") continue;
-            var id = GetGenreId(child.GetAttribute("href"));
-            if (id is not null) return id;
+            if (child.LocalName == "a" && GetGenreId(child.GetAttribute("href")) is { } id) return id;
         }
         return null;
     }
@@ -58,10 +41,16 @@ public sealed class DiscasGenreMasterParser
         if (string.IsNullOrWhiteSpace(href)) return null;
         var queryIndex = href.IndexOf('?');
         if (queryIndex < 0) return null;
-        var query = HttpUtility.ParseQueryString(href[(queryIndex + 1)..]);
-        var value = query["G"] ?? query["g"];
-        if (string.IsNullOrWhiteSpace(value) || value.Contains(',')) return null;
-        return value.Trim();
+        foreach (var part in href[(queryIndex + 1)..].Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var separator = part.IndexOf('=');
+            if (separator <= 0) continue;
+            var key = Uri.UnescapeDataString(part[..separator]);
+            if (!key.Equals("G", StringComparison.OrdinalIgnoreCase)) continue;
+            var value = Uri.UnescapeDataString(part[(separator + 1)..].Replace('+', ' ')).Trim();
+            return value.Length == 0 || value.Contains(',') ? null : value;
+        }
+        return null;
     }
 
     private static string? Normalize(string value)
