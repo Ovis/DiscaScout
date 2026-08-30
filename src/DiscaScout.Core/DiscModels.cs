@@ -21,6 +21,7 @@ public sealed class Disc
     public string? GenreSmall { get; set; }
     public string? ImageUrl { get; set; }
     public string? ImagePath { get; set; }
+    public string? DetailImageUrl { get; set; }
     public DateOnly? RentalStartDate { get; set; }
     public bool IsMaxiSingle { get; set; }
     public bool? IsTwoDisc { get; set; }
