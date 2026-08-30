@@ -36,7 +36,14 @@ builder.Services.AddSingleton<ScrapeExecutionGate>(); builder.Services.AddSingle
 builder.Services.AddHostedService<ScrapeBackgroundService>(); builder.Services.AddHostedService<DiscImageCacheBackgroundService>(); builder.Services.AddHostedService<DiscDetailMetadataBackgroundService>();
 
 var app = builder.Build();
-await using (var scope = app.Services.CreateAsyncScope()) await scope.ServiceProvider.GetRequiredService<DiscaScoutDbContext>().Database.MigrateAsync();
+await using (var scope = app.Services.CreateAsyncScope())
+{
+    await scope.ServiceProvider.GetRequiredService<DiscaScoutDbContext>().Database.MigrateAsync();
+
+    // #38で詳細ページのナビゲーション文字列をジャンルとして保存した可能性があるため、
+    // ホスト起動時に明らかな汚染データだけを未取得へ戻してバックグラウンド再取得へ回す。
+    await scope.ServiceProvider.GetRequiredService<DiscDetailMetadataService>().RepairCorruptedImportedGenresAsync();
+}
 app.MapGet("/", () => Results.Redirect("/discs")); app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapGet("/disc-image/{id:long}", async (long id, DiscaScoutDbContext dbContext, CancellationToken cancellationToken) =>
 {
