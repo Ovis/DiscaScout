@@ -133,17 +133,7 @@
                     <dt>DISCAS ID</dt>
                     <dd>@Model.Disc.DiscasId</dd>
                     <dt>ジャンル</dt>
-                    <dd>
-                        @Model.Disc.GenreLarge
-                        @if (!string.IsNullOrWhiteSpace(Model.Disc.GenreMiddle))
-                        {
-                            <text> / @Model.Disc.GenreMiddle</text>
-                        }
-                        @if (!string.IsNullOrWhiteSpace(Model.Disc.GenreSmall))
-                        {
-                            <text> / @Model.Disc.GenreSmall</text>
-                        }
-                    </dd>
+                    <dd>@DiscDetailViewModel.FormatGenrePath(Model.Disc)</dd>
                     <dt>マキシシングル</dt>
                     <dd>@(Model.Disc.IsMaxiSingle ? "はい" : "いいえ")</dd>
                     <dt>2枚組</dt>
