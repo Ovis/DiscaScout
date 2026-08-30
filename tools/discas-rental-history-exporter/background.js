@@ -1,5 +1,6 @@
 const STATE_KEY = "rentalHistoryExporterState";
 const RESULT_KEY = "rentalHistoryExporterLastSuccessfulResult";
+const DEBUG_HTML_KEY = "rentalHistoryExporterDebugHtml";
 const HISTORY_URL = "https://www.discas.net/netdvd/wish/rentalLog.do";
 const ALARM_NAME = "discas-rental-history-next-page";
 
@@ -17,7 +18,8 @@ chrome.runtime.onInstalled.addListener(() => resumeInterruptedJob());
 
 async function handleMessage(message) {
     switch (message.type) {
-        case "get-state": return { ok: true, state: await getState(), result: (await chrome.storage.local.get(RESULT_KEY))[RESULT_KEY] ?? null };
+        case "get-state": return { ok: true, state: await getState(), result: (await chrome.storage.local.get(RESULT_KEY))[RESULT_KEY] ?? null, hasDebugHtml: Boolean((await chrome.storage.local.get(DEBUG_HTML_KEY))[DEBUG_HTML_KEY]?.html) };
+        case "get-debug-html": return { ok: true, debugHtml: (await chrome.storage.local.get(DEBUG_HTML_KEY))[DEBUG_HTML_KEY] ?? null };
         case "start": await startJob(false); return { ok: true };
         case "resume": await startJob(true); return { ok: true };
         case "cancel": await requestCancel(); return { ok: true };
@@ -74,9 +76,22 @@ async function fetchAndParse(page) {
     const url = `${HISTORY_URL}?pageNo=${page}&pT=0`;
     const response = await fetch(url, { credentials: "include", cache: "no-store", redirect: "follow" });
     if (!response.ok) throw new Error(`ページ${page}の取得に失敗しました (HTTP ${response.status})`);
+    const html = await response.text();
+
+    // HTML解析に失敗した場合でも実際にDISCASから返された内容を確認できるよう、直近のレスポンスを保存する。
+    // 認証済みページの内容を含むため、通常結果とは分離し、デバッグ操作を行った場合だけユーザーが明示的に出力できるようにする。
+    await chrome.storage.local.set({
+        [DEBUG_HTML_KEY]: {
+            fetchedAt: new Date().toISOString(),
+            requestedUrl: url,
+            responseUrl: response.url,
+            page,
+            html
+        }
+    });
+
     // ログイン切れ等で別ページが返った場合、空の履歴として処理すると完全性判定を誤るためURLも検証する。
     if (!response.url.includes("/netdvd/wish/rentalLog.do")) throw new Error("レンタル履歴以外へリダイレクトされました。DISCASへ再ログインしてください。");
-    const html = await response.text();
     const result = await chrome.runtime.sendMessage({ type: "parse-html", html });
     if (!result?.ok) throw new Error(result?.error ?? "HTMLを解析できませんでした。");
     return result.parsed;
