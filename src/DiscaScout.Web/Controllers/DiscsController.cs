@@ -22,7 +22,9 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
         [FromQuery(Name = "searchDescription")] bool searchDescription = false,
         [FromQuery(Name = "searchTracks")] bool searchTracks = false,
         [FromQuery(Name = "artist")] string? artistSearch = null,
-        [FromQuery(Name = "genre")] string? genre = null,
+        [FromQuery(Name = "genreLarge")] long? genreLargeId = null,
+        [FromQuery(Name = "genreMiddle")] long? genreMiddleId = null,
+        [FromQuery(Name = "genreSmall")] long? genreSmallId = null,
         [FromQuery(Name = "excludeMaxi")] bool excludeMaxi = false,
         [FromQuery(Name = "excludeAlbum")] bool excludeAlbum = false,
         [FromQuery(Name = "rental")] string rental = "all",
@@ -31,21 +33,29 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
         [FromQuery(Name = "p")] int pageNumber = 1,
         CancellationToken cancellationToken = default)
     {
-        NormalizeInputs(ref tab, ref uncheckedFilter, ref titleSearch, ref artistSearch, ref genre, ref rental, ref sort, ref pageSize, ref pageNumber);
+        NormalizeInputs(ref tab, ref uncheckedFilter, ref titleSearch, ref artistSearch, ref rental, ref sort, ref pageSize, ref pageNumber);
+        var genreGroups = await LoadGenreGroupsAsync(cancellationToken);
+        NormalizeGenreSelection(genreGroups, ref genreLargeId, ref genreMiddleId, ref genreSmallId);
 
         var uncheckedCount = await dbContext.Discs.CountAsync(IsUnchecked(), cancellationToken);
         var pickupCount = await dbContext.Discs.CountAsync(x => x.ArtistMatches.Any(m => m.IsCurrentMatch && !m.ArtistSetting.IsArchived && m.ArtistSetting.IsWatchEnabled), cancellationToken);
         var rentedCount = await dbContext.Discs.CountAsync(x => x.IsRented && !x.IsArchived, cancellationToken);
-        var genreGroups = await LoadGenreGroupsAsync(cancellationToken);
 
         var query = dbContext.Discs.AsNoTracking()
             .Include(x => x.ReviewReasons)
             .Include(x => x.Sources)
             .Include(x => x.ArtistMatches).ThenInclude(x => x.ArtistSetting)
+            .Include(x => x.Genre).ThenInclude(x => x!.Parent).ThenInclude(x => x!.Parent)
             .AsQueryable();
-        query = ApplyTab(query, tab, HasSearchFilters(titleSearch, artistSearch, genre, excludeMaxi, excludeAlbum));
+
+        var selectedGenreId = genreSmallId ?? genreMiddleId ?? genreLargeId;
+        var descendantGenreIds = selectedGenreId.HasValue
+            ? await LoadDescendantGenreIdsAsync(selectedGenreId.Value, cancellationToken)
+            : [];
+
+        query = ApplyTab(query, tab, HasSearchFilters(titleSearch, artistSearch, selectedGenreId, excludeMaxi, excludeAlbum));
         query = ApplyUncheckedFilter(query, tab, uncheckedFilter);
-        query = ApplySearch(query, titleSearch, searchDescription, searchTracks, artistSearch, genre);
+        query = ApplySearch(query, titleSearch, searchDescription, searchTracks, artistSearch, descendantGenreIds);
         query = ApplyFormatFilter(query, excludeMaxi, excludeAlbum);
         query = ApplyRentalFilter(query, rental);
         query = ApplySort(query, sort);
@@ -63,7 +73,9 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
             SearchDescription = searchDescription,
             SearchTracks = searchTracks,
             ArtistSearch = artistSearch,
-            Genre = genre,
+            GenreLargeId = genreLargeId,
+            GenreMiddleId = genreMiddleId,
+            GenreSmallId = genreSmallId,
             ExcludeMaxi = excludeMaxi,
             ExcludeAlbum = excludeAlbum,
             Rental = rental,
@@ -153,7 +165,6 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
         foreach (var disc in discs) MarkRented(disc, now);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        // 既存Undoは単一CDの状態だけを保持するため、一括操作後に誤ったUndoを提示しないよう破棄する。
         TempData.Remove(nameof(DiscsViewModel.UndoPayload));
         TempData[nameof(DiscsViewModel.StatusMessage)] = discs.Count == 0
             ? "借りた状態へ変更できるCDが選択されていません"
@@ -175,10 +186,9 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
         disc.NeedsReview = state.NeedsReview;
         disc.LastReviewedAt = state.LastReviewedAt;
         foreach (var reason in state.Reasons)
-        {
             disc.ReviewReasons.Add(new DiscReviewReason { Reason = reason.Reason, CreatedAt = reason.CreatedAt });
-        }
         await dbContext.SaveChangesAsync(cancellationToken);
+
         TempData.Remove(nameof(DiscsViewModel.UndoPayload));
         TempData[nameof(DiscsViewModel.StatusMessage)] = $"「{disc.Title}」の直前の操作を元に戻しました";
         return RedirectBack(returnUrl);
@@ -200,26 +210,74 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
         ? LocalRedirect(returnUrl)
         : RedirectToAction(nameof(Index));
 
-    private async Task<IReadOnlyList<DiscsViewModel.GenreGroup>> LoadGenreGroupsAsync(CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<DiscsViewModel.GenreOption>> LoadGenreGroupsAsync(CancellationToken cancellationToken)
     {
-        // ジャンルマスタは持たないため、実際に観測した大・中・小ジャンルの組み合わせから階層を復元する。
-        var genres = await dbContext.Discs.AsNoTracking().Select(x => new { x.GenreLarge, x.GenreMiddle, x.GenreSmall }).Distinct().ToListAsync(cancellationToken);
-        return genres.GroupBy(x => x.GenreLarge, StringComparer.Ordinal)
-            .OrderBy(x => x.Key, StringComparer.Ordinal)
-            .Select(largeGroup => new DiscsViewModel.GenreGroup(
-                largeGroup.Key,
-                largeGroup.Where(x => !string.IsNullOrWhiteSpace(x.GenreMiddle))
-                    .GroupBy(x => x.GenreMiddle!, StringComparer.Ordinal)
-                    .OrderBy(x => x.Key, StringComparer.Ordinal)
-                    .Select(middleGroup => new DiscsViewModel.GenreMiddleGroup(
-                        middleGroup.Key,
-                        middleGroup.Where(x => !string.IsNullOrWhiteSpace(x.GenreSmall))
-                            .Select(x => x.GenreSmall!)
-                            .Distinct(StringComparer.Ordinal)
-                            .OrderBy(x => x, StringComparer.Ordinal)
-                            .ToArray()))
-                    .ToArray()))
-            .ToArray();
+        // 現在有効なジャンルに加え、既存Discが参照しているInactiveジャンルも過去データの検索用に表示する。
+        var referencedIds = await dbContext.Discs.AsNoTracking()
+            .Where(x => x.GenreId != null)
+            .Select(x => x.GenreId!.Value)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        var genres = await dbContext.Genres.AsNoTracking()
+            .Where(x => x.IsActive || referencedIds.Contains(x.Id))
+            .OrderBy(x => x.SortOrder)
+            .ThenBy(x => x.Id)
+            .ToListAsync(cancellationToken);
+
+        var byParent = genres.ToLookup(x => x.ParentId);
+        return byParent[null].Select(x => BuildGenreOption(x, byParent, 0)).ToArray();
+    }
+
+    private static DiscsViewModel.GenreOption BuildGenreOption(Genre genre, ILookup<long?, Genre> byParent, int depth)
+    {
+        // 画面はDISCASの現行UIに合わせて3段選択とする。内部Genreモデル自体は任意深度を維持する。
+        var children = depth >= 2
+            ? []
+            : byParent[genre.Id].OrderBy(x => x.SortOrder).ThenBy(x => x.Id).Select(x => BuildGenreOption(x, byParent, depth + 1)).ToArray();
+        return new DiscsViewModel.GenreOption(genre.Id, genre.Name, genre.IsActive, children);
+    }
+
+    private async Task<long[]> LoadDescendantGenreIdsAsync(long selectedGenreId, CancellationToken cancellationToken)
+    {
+        var genres = await dbContext.Genres.AsNoTracking().Select(x => new { x.Id, x.ParentId }).ToListAsync(cancellationToken);
+        var result = new HashSet<long> { selectedGenreId };
+        var frontier = new Queue<long>();
+        frontier.Enqueue(selectedGenreId);
+        while (frontier.Count > 0)
+        {
+            var parent = frontier.Dequeue();
+            foreach (var child in genres.Where(x => x.ParentId == parent))
+            {
+                if (result.Add(child.Id)) frontier.Enqueue(child.Id);
+            }
+        }
+        return result.ToArray();
+    }
+
+    private static void NormalizeGenreSelection(
+        IReadOnlyList<DiscsViewModel.GenreOption> groups,
+        ref long? largeId,
+        ref long? middleId,
+        ref long? smallId)
+    {
+        var large = largeId.HasValue ? groups.SingleOrDefault(x => x.Id == largeId.Value) : null;
+        if (large is null)
+        {
+            largeId = null;
+            middleId = null;
+            smallId = null;
+            return;
+        }
+
+        var middle = middleId.HasValue ? large.Children.SingleOrDefault(x => x.Id == middleId.Value) : null;
+        if (middle is null)
+        {
+            middleId = null;
+            smallId = null;
+            return;
+        }
+
+        if (smallId.HasValue && middle.Children.All(x => x.Id != smallId.Value)) smallId = null;
     }
 
     private static IQueryable<Disc> ApplyTab(IQueryable<Disc> query, string tab, bool hasSearchFilters) => tab switch
@@ -236,9 +294,7 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
 
     private static IQueryable<Disc> ApplyUncheckedFilter(IQueryable<Disc> query, string tab, string filter)
     {
-        // 未チェック固有の絞り込みなので、他タブへ移動した際に同じ条件が意図せず適用されないようにする。
         if (tab != "unchecked") return query;
-
         var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeBySystemTimeZoneId(TimeProvider.System.GetUtcNow(), "Asia/Tokyo").DateTime);
         return filter switch
         {
@@ -255,15 +311,12 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
         bool searchDescription,
         bool searchTracks,
         string? artistSearch,
-        string? genre)
+        IReadOnlyCollection<long> genreIds)
     {
         foreach (var term in SplitTerms(titleSearch))
         {
             var rawTerm = term;
             var normalized = DiscTextNormalizer.Normalize(term);
-
-            // タイトル検索の既存AND条件を維持したまま、指定された補完情報を各キーワードの検索対象へ加える。
-            // 詳細・曲目は検索専用の正規化列を持たないため、保存済み表示文字列へ部分一致させる。
             query = query.Where(x =>
                 x.NormalizedTitle.Contains(normalized)
                 || (searchDescription && x.Description != null && x.Description.Contains(rawTerm))
@@ -274,7 +327,7 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
             var normalized = DiscTextNormalizer.Normalize(term);
             query = query.Where(x => x.NormalizedArtist.Contains(normalized));
         }
-        if (!string.IsNullOrWhiteSpace(genre)) query = query.Where(x => x.GenreLarge == genre || x.GenreMiddle == genre || x.GenreSmall == genre);
+        if (genreIds.Count > 0) query = query.Where(x => x.GenreId != null && genreIds.Contains(x.GenreId.Value));
         return query;
     }
 
@@ -303,14 +356,22 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
         _ => query.OrderByDescending(x => x.LastUpdatedAt).ThenByDescending(x => x.Id)
     };
 
-    private static bool HasSearchFilters(string? titleSearch, string? artistSearch, string? genre, bool excludeMaxi, bool excludeAlbum) =>
-        !string.IsNullOrWhiteSpace(titleSearch) || !string.IsNullOrWhiteSpace(artistSearch) || !string.IsNullOrWhiteSpace(genre) || excludeMaxi || excludeAlbum;
+    private static bool HasSearchFilters(string? titleSearch, string? artistSearch, long? genreId, bool excludeMaxi, bool excludeAlbum) =>
+        !string.IsNullOrWhiteSpace(titleSearch) || !string.IsNullOrWhiteSpace(artistSearch) || genreId.HasValue || excludeMaxi || excludeAlbum;
 
     private static IEnumerable<string> SplitTerms(string? value) => string.IsNullOrWhiteSpace(value)
         ? []
         : value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-    private static void NormalizeInputs(ref string tab, ref string uncheckedFilter, ref string? titleSearch, ref string? artistSearch, ref string? genre, ref string rental, ref string sort, ref int pageSize, ref int pageNumber)
+    private static void NormalizeInputs(
+        ref string tab,
+        ref string uncheckedFilter,
+        ref string? titleSearch,
+        ref string? artistSearch,
+        ref string rental,
+        ref string sort,
+        ref int pageSize,
+        ref int pageNumber)
     {
         if (tab is not ("unchecked" or "pickup" or "rented" or "all")) tab = "unchecked";
         if (uncheckedFilter is not ("all" or "upcoming" or "new" or "artist-watch")) uncheckedFilter = "all";
@@ -320,7 +381,6 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
         pageNumber = Math.Max(1, pageNumber);
         titleSearch = string.IsNullOrWhiteSpace(titleSearch) ? null : titleSearch.Trim();
         artistSearch = string.IsNullOrWhiteSpace(artistSearch) ? null : artistSearch.Trim();
-        genre = string.IsNullOrWhiteSpace(genre) ? null : genre.Trim();
     }
 
     private sealed record ReviewUndoState(long DiscId, bool IsRented, bool NeedsReview, DateTime? LastReviewedAt, IReadOnlyList<ReviewReasonUndoState> Reasons);
