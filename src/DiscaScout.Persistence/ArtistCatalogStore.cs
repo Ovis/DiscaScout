@@ -14,8 +14,8 @@ public sealed class ArtistCatalogStore(
 {
     private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
 
-    /// <summary>テスト互換用に時刻プロバイダーだけを指定して初期化する</summary>
-    internal ArtistCatalogStore(DiscaScoutDbContext dbContext, TimeProvider? timeProvider)
+    /// <summary>テスト用に時刻プロバイダーだけを指定して初期化する</summary>
+    public ArtistCatalogStore(DiscaScoutDbContext dbContext, TimeProvider timeProvider)
         : this(dbContext, new GenreResolver(dbContext), timeProvider)
     {
     }
@@ -25,28 +25,21 @@ public sealed class ArtistCatalogStore(
         dbContext.ArtistSettings.AsNoTracking().SingleOrDefaultAsync(x => x.Id == artistSettingId, cancellationToken);
 
     /// <summary>正常取得済みのアーティスト検索結果を専用Catalog関係へ反映する</summary>
-    public async Task<ArtistCatalogApplyResult> ApplyAsync(
-        long artistSettingId,
-        DiscasArtistCatalogSnapshot snapshot,
-        CancellationToken cancellationToken = default)
+    public async Task<ArtistCatalogApplyResult> ApplyAsync(long artistSettingId, DiscasArtistCatalogSnapshot snapshot, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
-
         var setting = await dbContext.ArtistSettings.SingleAsync(x => x.Id == artistSettingId, cancellationToken);
-        if (setting.IsArchived || !setting.CollectFullCatalog)
-            throw new InvalidOperationException("全作品収集が有効なArtistSettingではない");
+        if (setting.IsArchived || !setting.CollectFullCatalog) throw new InvalidOperationException("全作品収集が有効なArtistSettingではない");
 
         var now = clock.GetUtcNow().UtcDateTime;
         var isInitialCollection = !setting.InitialCatalogCollectionCompleted;
         var reviewInitialItems = isInitialCollection && setting.ReviewInitialCatalogItems;
         await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
-
         var discs = await dbContext.Discs.Include(x => x.Sources).Include(x => x.ArtistCatalogEntries).ToListAsync(cancellationToken);
         var byDiscasId = discs.ToDictionary(x => x.DiscasId, StringComparer.Ordinal);
         var existingRelations = await dbContext.DiscArtistCatalogs.Where(x => x.ArtistSettingId == artistSettingId).ToListAsync(cancellationToken);
         var relationByDiscId = existingRelations.ToDictionary(x => x.DiscId);
         var seenDiscIds = new HashSet<long>();
-
         var matchedCount = 0;
         var addedDiscCount = 0;
         var activatedCount = 0;
@@ -55,7 +48,6 @@ public sealed class ArtistCatalogStore(
         {
             var normalizedArtist = DiscTextNormalizer.Normalize(scraped.Artist);
             if (!ArtistWatchMatcher.IsMatch(normalizedArtist, setting)) continue;
-
             matchedCount++;
             var genre = await genreResolver.ResolveAsync(scraped.GenreLarge, scraped.GenreMiddle, scraped.GenreSmall, cancellationToken);
 
@@ -66,8 +58,6 @@ public sealed class ArtistCatalogStore(
                 discs.Add(disc);
                 byDiscasId.Add(disc.DiscasId, disc);
                 addedDiscCount++;
-
-                // IDはSaveChangesまで確定しないため、新規DiscのCatalog relationはnavigation経由で追加する。
                 disc.ArtistCatalogEntries.Add(CreateRelation(setting, now));
                 activatedCount++;
                 continue;
@@ -75,7 +65,6 @@ public sealed class ArtistCatalogStore(
 
             seenDiscIds.Add(disc.Id);
             if (disc.Sources.Count == 0) ApplyCatalogMetadata(disc, scraped, genre?.Id, now);
-
             if (!relationByDiscId.TryGetValue(disc.Id, out var existingRelation))
             {
                 disc.ArtistCatalogEntries.Add(CreateRelation(setting, now));
@@ -104,7 +93,6 @@ public sealed class ArtistCatalogStore(
         setting.InitialCatalogCollectionCompleted = true;
         await dbContext.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-
         return new ArtistCatalogApplyResult(snapshot.TotalCount, matchedCount, addedDiscCount, activatedCount, deactivatedCount);
     }
 
@@ -128,25 +116,13 @@ public sealed class ArtistCatalogStore(
             IsArchived = true,
             NeedsReview = needsReview
         };
-
-        if (needsReview)
-        {
-            disc.ReviewReasons.Add(new DiscReviewReason
-            {
-                Reason = DiscReviewReasonType.ArtistMatched,
-                CreatedAt = now
-            });
-        }
-
+        if (needsReview) disc.ReviewReasons.Add(new DiscReviewReason { Reason = DiscReviewReasonType.ArtistMatched, CreatedAt = now });
         return disc;
     }
 
     private static DiscArtistCatalog CreateRelation(ArtistSetting setting, DateTime now) => new()
     {
-        ArtistSetting = setting,
-        IsActive = true,
-        FirstSeenAt = now,
-        LastSeenAt = now
+        ArtistSetting = setting, IsActive = true, FirstSeenAt = now, LastSeenAt = now
     };
 
     private static void ApplyCatalogMetadata(Disc disc, ScrapedDisc scraped, long? genreId, DateTime now)
@@ -166,9 +142,4 @@ public sealed class ArtistCatalogStore(
 }
 
 /// <summary>Artist全作品スナップショットの反映結果を保持する</summary>
-public sealed record ArtistCatalogApplyResult(
-    int SearchResultCount,
-    int MatchedCount,
-    int AddedDiscCount,
-    int ActivatedCount,
-    int DeactivatedCount);
+public sealed record ArtistCatalogApplyResult(int SearchResultCount, int MatchedCount, int AddedDiscCount, int ActivatedCount, int DeactivatedCount);
