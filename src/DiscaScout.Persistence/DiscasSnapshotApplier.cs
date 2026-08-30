@@ -93,7 +93,7 @@ public sealed class DiscasSnapshotApplier(DiscaScoutDbContext dbContext, TimePro
                 disc.Sources.Add(source);
                 changed = true;
 
-                // 全作品収集で先にDBへ入ったCDには通常Sourceが1件もない。
+                // 全作品収集やレンタル履歴で先にDBへ入ったCDには通常Sourceが1件もない。
                 // そのCDが初めてNew/Upcomingへ現れた時点をユーザーにとっての「新着」として扱う。
                 if (!hadNormalSource && !disc.IsRented)
                 {
@@ -150,7 +150,9 @@ public sealed class DiscasSnapshotApplier(DiscaScoutDbContext dbContext, TimePro
                 }
             }
 
-            disc.IsArchived = !disc.Sources.Any(x => x.IsActive);
+            // レンタル履歴から取り込んだCDは、通常カテゴリから消えても「過去に借りたCD」として一覧に残す。
+            // Artist Catalog専用CDについては従来どおり通常SourceがなければArchive扱いにする。
+            disc.IsArchived = !disc.Sources.Any(x => x.IsActive) && disc.RentalHistoryImportedAt is null;
         }
 
         if (consumeCountDropOverride)

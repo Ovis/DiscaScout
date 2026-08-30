@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.RegularExpressions;
 using DiscaScout.Core;
 using DiscaScout.Persistence;
 using DiscaScout.Scraping;
@@ -7,15 +8,8 @@ using Microsoft.Extensions.Logging;
 
 namespace DiscaScout.Application;
 
-/// <summary>
-/// DISCAS詳細ページの取得要否を判定し、CDの補完メタデータへ反映する
-/// </summary>
-public sealed class DiscDetailMetadataService(
-    DiscaScoutDbContext dbContext,
-    DiscasPageFetcher pageFetcher,
-    DiscasDiscDetailParser parser,
-    ILogger<DiscDetailMetadataService> logger,
-    TimeProvider? timeProvider = null)
+/// <summary>DISCAS詳細ページの取得要否を判定し、CDの補完メタデータへ反映する</summary>
+public sealed partial class DiscDetailMetadataService(DiscaScoutDbContext dbContext, DiscasPageFetcher pageFetcher, DiscasDiscDetailParser parser, ILogger<DiscDetailMetadataService> logger, TimeProvider? timeProvider = null)
 {
     private static readonly TimeSpan FailedAttemptRetryInterval = TimeSpan.FromHours(6);
     private static readonly TimeZoneInfo JapanTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Asia/Tokyo");
@@ -24,54 +18,33 @@ public sealed class DiscDetailMetadataService(
     /// <summary>現在の詳細情報補完の進捗件数を取得する</summary>
     public async Task<DiscDetailFetchProgress> GetProgressAsync(CancellationToken cancellationToken = default)
     {
-        var now = clock.GetUtcNow().UtcDateTime;
-        var retryBefore = now - FailedAttemptRetryInterval;
-        var today = GetJapanToday(now);
+        var now = clock.GetUtcNow().UtcDateTime; var retryBefore = now - FailedAttemptRetryInterval; var today = GetJapanToday(now);
         var incomplete = dbContext.Discs.AsNoTracking().Where(x => !x.DetailRefreshCompleted);
-
         var total = await incomplete.CountAsync(cancellationToken);
-        var dueNow = await incomplete.CountAsync(x =>
-            (x.DetailFetchedAt == null && (x.DetailLastAttemptAt == null || x.DetailLastAttemptAt <= retryBefore))
-            || (x.DetailFetchedAt != null && x.RentalStartDate != null && x.RentalStartDate <= today), cancellationToken);
-        var retryCooldown = await incomplete.CountAsync(x =>
-            x.DetailFetchedAt == null && x.DetailLastAttemptAt != null && x.DetailLastAttemptAt > retryBefore, cancellationToken);
-        var waitingForRentalStart = await incomplete.CountAsync(x =>
-            x.DetailFetchedAt != null && x.RentalStartDate != null && x.RentalStartDate > today, cancellationToken);
-
+        var dueNow = await incomplete.CountAsync(x => (x.DetailFetchedAt == null && (x.DetailLastAttemptAt == null || x.DetailLastAttemptAt <= retryBefore)) || (x.DetailFetchedAt != null && x.RentalStartDate != null && x.RentalStartDate <= today), cancellationToken);
+        var retryCooldown = await incomplete.CountAsync(x => x.DetailFetchedAt == null && x.DetailLastAttemptAt != null && x.DetailLastAttemptAt > retryBefore, cancellationToken);
+        var waitingForRentalStart = await incomplete.CountAsync(x => x.DetailFetchedAt != null && x.RentalStartDate != null && x.RentalStartDate > today, cancellationToken);
         return new DiscDetailFetchProgress(total, dueNow, retryCooldown, waitingForRentalStart);
     }
 
     /// <summary>現在取得すべき詳細情報があるCDを1件返す</summary>
     public async Task<long?> GetNextDueDiscIdAsync(CancellationToken cancellationToken = default)
     {
-        var now = clock.GetUtcNow().UtcDateTime;
-        var retryBefore = now - FailedAttemptRetryInterval;
-        var today = GetJapanToday(now);
-
-        return await dbContext.Discs.AsNoTracking()
-            .Where(x => !x.DetailRefreshCompleted)
-            .Where(x =>
-                (x.DetailFetchedAt == null && (x.DetailLastAttemptAt == null || x.DetailLastAttemptAt <= retryBefore))
-                || (x.DetailFetchedAt != null && x.RentalStartDate != null && x.RentalStartDate <= today))
-            .OrderBy(x => x.DetailFetchedAt != null)
-            .ThenBy(x => x.DetailLastAttemptAt)
-            .ThenBy(x => x.Id)
-            .Select(x => (long?)x.Id)
-            .FirstOrDefaultAsync(cancellationToken);
+        var now = clock.GetUtcNow().UtcDateTime; var retryBefore = now - FailedAttemptRetryInterval; var today = GetJapanToday(now);
+        return await dbContext.Discs.AsNoTracking().Where(x => !x.DetailRefreshCompleted)
+            .Where(x => (x.DetailFetchedAt == null && (x.DetailLastAttemptAt == null || x.DetailLastAttemptAt <= retryBefore)) || (x.DetailFetchedAt != null && x.RentalStartDate != null && x.RentalStartDate <= today))
+            // レンタル履歴インポート直後は過去に借りたCDの情報を早く揃えたいので、通常の未取得CDより先に選ぶ。
+            .OrderBy(x => x.RentalHistoryImportedAt == null).ThenBy(x => x.DetailFetchedAt != null).ThenBy(x => x.DetailLastAttemptAt).ThenBy(x => x.Id)
+            .Select(x => (long?)x.Id).FirstOrDefaultAsync(cancellationToken);
     }
 
     /// <summary>指定CDが現在詳細取得対象か判定する</summary>
     public async Task<bool> IsDueAsync(long discId, CancellationToken cancellationToken = default)
     {
-        var state = await dbContext.Discs.AsNoTracking().Where(x => x.Id == discId)
-            .Select(x => new { x.DetailRefreshCompleted, x.DetailFetchedAt, x.DetailLastAttemptAt, x.RentalStartDate })
-            .SingleOrDefaultAsync(cancellationToken);
+        var state = await dbContext.Discs.AsNoTracking().Where(x => x.Id == discId).Select(x => new { x.DetailRefreshCompleted, x.DetailFetchedAt, x.DetailLastAttemptAt, x.RentalStartDate }).SingleOrDefaultAsync(cancellationToken);
         if (state is null || state.DetailRefreshCompleted) return false;
-
         var now = clock.GetUtcNow().UtcDateTime;
-        if (state.DetailFetchedAt is null)
-            return state.DetailLastAttemptAt is null || state.DetailLastAttemptAt <= now - FailedAttemptRetryInterval;
-
+        if (state.DetailFetchedAt is null) return state.DetailLastAttemptAt is null || state.DetailLastAttemptAt <= now - FailedAttemptRetryInterval;
         return state.RentalStartDate is not null && state.RentalStartDate <= GetJapanToday(now);
     }
 
@@ -81,71 +54,46 @@ public sealed class DiscDetailMetadataService(
         if (!await IsDueAsync(discId, cancellationToken)) return false;
         var disc = await dbContext.Discs.Include(x => x.Tracks).SingleOrDefaultAsync(x => x.Id == discId, cancellationToken);
         if (disc is null) return false;
-
-        logger.LogInformation(
-            "DISCAS詳細取得を開始します: DiscId={DiscId}, DiscasId={DiscasId}, Title={Title}, Artist={Artist}, Url={Url}",
-            disc.Id,
-            disc.DiscasId,
-            disc.Title,
-            disc.Artist,
-            disc.ProductUrl);
-
+        logger.LogInformation("DISCAS詳細取得を開始します: DiscId={DiscId}, DiscasId={DiscasId}, Title={Title}, Artist={Artist}, Url={Url}", disc.Id, disc.DiscasId, disc.Title, disc.Artist, disc.ProductUrl);
         try
         {
-            disc.DetailLastAttemptAt = clock.GetUtcNow().UtcDateTime;
-            await dbContext.SaveChangesAsync(cancellationToken);
-
+            disc.DetailLastAttemptAt = clock.GetUtcNow().UtcDateTime; await dbContext.SaveChangesAsync(cancellationToken);
             var result = await pageFetcher.FetchAsync(new Uri(disc.ProductUrl), cancellationToken);
-            if (result.StatusCode is < HttpStatusCode.OK or >= HttpStatusCode.MultipleChoices)
-                throw new HttpRequestException($"DISCAS詳細ページの取得に失敗した: {(int)result.StatusCode} {result.StatusCode}");
+            if (result.StatusCode is < HttpStatusCode.OK or >= HttpStatusCode.MultipleChoices) throw new HttpRequestException($"DISCAS詳細ページの取得に失敗した: {(int)result.StatusCode} {result.StatusCode}");
+            var detail = parser.Parse(result.Html, result.FinalUri); var fetchedAt = clock.GetUtcNow().UtcDateTime; var today = GetJapanToday(fetchedAt);
 
-            var detail = parser.Parse(result.Html, result.FinalUri);
-            var fetchedAt = clock.GetUtcNow().UtcDateTime;
-            var today = GetJapanToday(fetchedAt);
-            disc.RentalStartDate = detail.RentalStartDate;
-            disc.Description = detail.Description;
-            disc.IsTwoDisc = detail.IsTwoDisc;
-            disc.DetailFetchedAt = fetchedAt;
-            disc.DetailRefreshCompleted = detail.RentalStartDate <= today;
+            // 履歴だけから新規作成したDiscのタイトル・アーティストはインポートJSON由来の仮値であるため、未取得ジャンルの場合だけ詳細ページを正式値として採用する。
+            if (disc.RentalHistoryImportedAt is not null && disc.GenreLarge == "未取得")
+            {
+                disc.Title = detail.Title; disc.NormalizedTitle = DiscTextNormalizer.Normalize(detail.Title); disc.Artist = detail.Artist; disc.NormalizedArtist = DiscTextNormalizer.Normalize(detail.Artist); disc.IsMaxiSingle = detail.Title.StartsWith("【MAXI】", StringComparison.Ordinal);
+            }
 
-            dbContext.DiscTracks.RemoveRange(disc.Tracks);
-            disc.Tracks.Clear();
-            foreach (var track in detail.Tracks)
-                disc.Tracks.Add(new DiscTrack { TrackNumber = track.TrackNumber, Title = track.Title, Duration = track.Duration });
-
+            disc.RentalStartDate = detail.RentalStartDate; disc.Description = detail.Description; disc.IsTwoDisc = detail.IsTwoDisc;
+            disc.DetailImageUrl = detail.DetailImageUrl;
+            if (!string.IsNullOrWhiteSpace(detail.DetailImageUrl))
+            {
+                // 詳細画面ではMX画像を直接表示する一方、一覧で大量表示するローカルキャッシュは軽量なSXだけを保持する。
+                disc.ImageUrl = ToSmallJacketUrl(detail.DetailImageUrl);
+            }
+            disc.DetailFetchedAt = fetchedAt; disc.DetailRefreshCompleted = detail.RentalStartDate <= today;
+            dbContext.DiscTracks.RemoveRange(disc.Tracks); disc.Tracks.Clear();
+            foreach (var track in detail.Tracks) disc.Tracks.Add(new DiscTrack { TrackNumber = track.TrackNumber, Title = track.Title, Duration = track.Duration });
             await dbContext.SaveChangesAsync(cancellationToken);
-
-            logger.LogInformation(
-                "DISCAS詳細取得が完了しました: DiscId={DiscId}, DiscasId={DiscasId}, Title={Title}, Artist={Artist}, RentalStartDate={RentalStartDate}, TrackCount={TrackCount}, IsTwoDisc={IsTwoDisc}, RefreshCompleted={RefreshCompleted}",
-                disc.Id,
-                disc.DiscasId,
-                disc.Title,
-                disc.Artist,
-                detail.RentalStartDate,
-                detail.Tracks.Count,
-                detail.IsTwoDisc,
-                disc.DetailRefreshCompleted);
-
+            logger.LogInformation("DISCAS詳細取得が完了しました: DiscId={DiscId}, DiscasId={DiscasId}, Title={Title}, Artist={Artist}, RentalStartDate={RentalStartDate}, TrackCount={TrackCount}, IsTwoDisc={IsTwoDisc}, RefreshCompleted={RefreshCompleted}", disc.Id, disc.DiscasId, disc.Title, disc.Artist, detail.RentalStartDate, detail.Tracks.Count, detail.IsTwoDisc, disc.DetailRefreshCompleted);
             return true;
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception exception)
         {
-            // HTTPやHTML解析の低レベルログだけでは対象CDを追跡できないため、
-            // 失敗時にもCD識別情報を同じログイベントへ含める。
-            logger.LogWarning(
-                exception,
-                "DISCAS詳細取得に失敗しました: DiscId={DiscId}, DiscasId={DiscasId}, Title={Title}, Artist={Artist}, Url={Url}",
-                disc.Id,
-                disc.DiscasId,
-                disc.Title,
-                disc.Artist,
-                disc.ProductUrl);
+            logger.LogWarning(exception, "DISCAS詳細取得に失敗しました: DiscId={DiscId}, DiscasId={DiscasId}, Title={Title}, Artist={Artist}, Url={Url}", disc.Id, disc.DiscasId, disc.Title, disc.Artist, disc.ProductUrl);
             throw;
         }
+    }
+
+    private static string ToSmallJacketUrl(string detailImageUrl)
+    {
+        // サイズ識別子はファイル名末尾だけを書き換え、URL途中に偶然含まれるMXには触れない。
+        return MediumJacketSuffixRegex().Replace(detailImageUrl, "${prefix}SX${extension}");
     }
 
     private static DateOnly GetJapanToday(DateTime utcDateTime)
@@ -153,6 +101,9 @@ public sealed class DiscDetailMetadataService(
         var japanTime = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utcDateTime, DateTimeKind.Utc), JapanTimeZone);
         return DateOnly.FromDateTime(japanTime);
     }
+
+    [GeneratedRegex(@"(?<prefix>_\d*)MX(?<extension>\.[A-Za-z0-9]+)(?=$|[?#])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex MediumJacketSuffixRegex();
 }
 
 /// <summary>詳細情報バックグラウンド補完の進捗件数を保持する</summary>

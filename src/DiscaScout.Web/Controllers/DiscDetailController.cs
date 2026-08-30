@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace DiscaScout.Web.Controllers;
 
 /// <summary>
-/// CD単体の詳細表示とレビュー・レンタル操作を提供する
+/// CD単体の詳細表示とレビュー・レンタル・詳細再取得操作を提供する
 /// </summary>
 [Route("discs")]
 public sealed class DiscDetailController(DiscaScoutDbContext dbContext, DiscDetailFetchSignal detailFetchSignal) : Controller
@@ -97,6 +97,29 @@ public sealed class DiscDetailController(DiscaScoutDbContext dbContext, DiscDeta
         disc.IsRented = false;
         await dbContext.SaveChangesAsync(cancellationToken);
         TempData[nameof(DiscDetailViewModel.StatusMessage)] = "未レンタル状態へ戻しました";
+        return RedirectToDetail(id, returnUrl);
+    }
+
+    /// <summary>
+    /// 保存済みの詳細取得状態を未完了へ戻し、バックグラウンドでの再取得を優先要求する
+    /// </summary>
+    [HttpPost("{id:long}/refetch-detail")]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> RefetchDetail(long id, string? returnUrl, CancellationToken cancellationToken)
+    {
+        var disc = await dbContext.Discs.SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+        if (disc is null) return NotFound();
+
+        // HTTP要求内でDISCASへ直接アクセスすると画面操作が外部サイトの応答待ちになるため、
+        // 取得済み状態だけを解除して既存の低速BackgroundServiceへ処理を委譲する。
+        // DetailFetchedAtをnullへ戻すことで、レンタル開始日が過去でもIsDueAsyncが即時取得対象として扱う。
+        disc.DetailRefreshCompleted = false;
+        disc.DetailFetchedAt = null;
+        disc.DetailLastAttemptAt = null;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        detailFetchSignal.Request(id);
+        TempData[nameof(DiscDetailViewModel.StatusMessage)] = "詳細情報の再取得を要求しました。バックグラウンドで取得します";
         return RedirectToDetail(id, returnUrl);
     }
 
