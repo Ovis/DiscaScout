@@ -1,9 +1,10 @@
+using DiscaScout.Application;
 using DiscaScout.Core;
 
 namespace DiscaScout.Web.Models;
 
 /// <summary>
-/// 設定画面へ渡すDiscord設定とスクレイピング安全装置状態を保持する
+/// 設定画面へ渡すDiscord設定、スクレイピング安全装置、ジャンルマスター状態を保持する
 /// </summary>
 public sealed class SettingsViewModel
 {
@@ -14,9 +15,14 @@ public sealed class SettingsViewModel
     public string? StatusMessage { get; init; }
     public IReadOnlyList<ScrapeGuardStatus> ScrapeGuards { get; init; } = [];
     public ScrapeGuardStatus? CountDropConfirmation { get; init; }
+    public GenreMasterStatus GenreMaster { get; init; } = new(0, 0, null);
 
     public static DateTime ToJapanTime(DateTime value) =>
         TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(value, DateTimeKind.Utc), JapanTimeZone);
+
+    public static string FormatJapanTime(DateTime? value) => value.HasValue
+        ? ToJapanTime(value.Value).ToString("yyyy-MM-dd HH:mm:ss") + " JST"
+        : "未取得";
 
     public static string GetCategoryLabel(ScrapeCategory category) => category switch
     {
