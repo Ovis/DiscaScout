@@ -1,0 +1,203 @@
+const STATE_KEY = "rentalHistoryExporterState";
+const RESULT_KEY = "rentalHistoryExporterLastSuccessfulResult";
+const DEBUG_HTML_KEY = "rentalHistoryExporterDebugHtml";
+const HISTORY_URL = "https://www.discas.net/netdvd/wish/rentalLog.do";
+const ALARM_NAME = "discas-rental-history-next-page";
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    handleMessage(message).then(sendResponse).catch(error => sendResponse({ ok: false, error: error.message }));
+    return true;
+});
+
+chrome.alarms.onAlarm.addListener(alarm => {
+    if (alarm.name === ALARM_NAME) processNextPage().catch(error => failJob(error.message));
+});
+
+chrome.runtime.onStartup.addListener(() => resumeInterruptedJob());
+chrome.runtime.onInstalled.addListener(() => resumeInterruptedJob());
+
+async function handleMessage(message) {
+    switch (message.type) {
+        case "get-state": return { ok: true, state: await getState(), result: (await chrome.storage.local.get(RESULT_KEY))[RESULT_KEY] ?? null, hasDebugHtml: Boolean((await chrome.storage.local.get(DEBUG_HTML_KEY))[DEBUG_HTML_KEY]?.html) };
+        case "get-debug-html": return { ok: true, debugHtml: (await chrome.storage.local.get(DEBUG_HTML_KEY))[DEBUG_HTML_KEY] ?? null };
+        case "start": await startJob(false); return { ok: true };
+        case "resume": await startJob(true); return { ok: true };
+        case "cancel": await requestCancel(); return { ok: true };
+        default: throw new Error("未対応の操作です。");
+    }
+}
+
+async function startJob(isResume) {
+    const previous = await getState();
+    const state = createInitialState(isResume ? previous?.records ?? [] : []);
+    await saveState(state);
+    await scheduleNext(100);
+}
+
+function createInitialState(existingRecords) {
+    return {
+        status: "running", currentPage: 0, totalPages: null, expectedTotalRows: null,
+        parsedRows: 0, cdRows: 0, records: existingRecords, pageStats: [], parseErrors: [], metadataConflicts: [],
+        retryPage: null, retryAttempt: 0, cancelRequested: false, startedAt: new Date().toISOString(), error: null
+    };
+}
+
+async function processNextPage() {
+    const state = await getState();
+    if (!state || !["running", "retrying"].includes(state.status)) return;
+    if (state.cancelRequested) { state.status = "cancelled"; await saveState(state); return; }
+
+    const page = state.currentPage + 1;
+    try {
+        const parsed = await fetchAndParse(page);
+        if (page === 1) {
+            if (parsed.historyTotalCount === null || parsed.totalPages === null) throw new Error("履歴の総件数または総ページ数を取得できませんでした。ログイン状態とページ構造を確認してください。");
+            // DISCASの「全N件」は返却済み履歴だけを表す。現在レンタル中の行も出力対象なので1ページ目で別途加算する。
+            state.expectedTotalRows = parsed.historyTotalCount + parsed.currentRows.length;
+            state.totalPages = parsed.totalPages;
+        }
+        applyPage(state, page, parsed);
+        state.currentPage = page;
+        state.status = "running";
+        state.retryPage = null;
+        state.retryAttempt = 0;
+        await saveState(state);
+
+        if (page >= state.totalPages) { await completeJob(state); return; }
+        if (state.cancelRequested) { state.status = "cancelled"; await saveState(state); return; }
+        await scheduleNext(calculateNormalDelay(page));
+    } catch (error) {
+        await handlePageFailure(state, page, error);
+    }
+}
+
+async function fetchAndParse(page) {
+    // DOMParserはService Workerに存在しないため、解析専用のoffscreen documentへHTMLを渡す。
+    await ensureOffscreenDocument();
+    const url = `${HISTORY_URL}?pageNo=${page}&pT=0`;
+    const response = await fetch(url, { credentials: "include", cache: "no-store", redirect: "follow" });
+    if (!response.ok) throw new Error(`ページ${page}の取得に失敗しました (HTTP ${response.status})`);
+
+    // Response.text()はHTML内のcharset宣言を参照せずUTF-8としてデコードするため、
+    // Windows-31JのDISCASページでは日本語が文字化けする。生バイト列をShift-JISとして明示的にデコードする。
+    const html = new TextDecoder("shift_jis").decode(await response.arrayBuffer());
+
+    // HTML解析に失敗した場合でも実際にDISCASから返された内容を確認できるよう、直近のレスポンスを保存する。
+    // 保存時はUTF-8のBlobとして出力するため、HTML自身の文字コード宣言もUTF-8へ合わせて再文字化けを防ぐ。
+    const debugHtml = normalizeDebugHtmlEncoding(html);
+    await chrome.storage.local.set({
+        [DEBUG_HTML_KEY]: {
+            fetchedAt: new Date().toISOString(),
+            requestedUrl: url,
+            responseUrl: response.url,
+            page,
+            html: debugHtml
+        }
+    });
+
+    // ログイン切れ等で別ページが返った場合、空の履歴として処理すると完全性判定を誤るためURLも検証する。
+    if (!response.url.includes("/netdvd/wish/rentalLog.do")) throw new Error("レンタル履歴以外へリダイレクトされました。DISCASへ再ログインしてください。");
+    const result = await chrome.runtime.sendMessage({ type: "parse-html", html });
+    if (!result?.ok) throw new Error(result?.error ?? "HTMLを解析できませんでした。");
+    return result.parsed;
+}
+
+function applyPage(state, page, parsed) {
+    // 現在レンタル中一覧は各ページのHTMLに含まれるため、1ページ目だけ取り込む。
+    // 返却済み履歴はページごとの20件をすべて取り込む。
+    const rows = page === 1 ? [...parsed.currentRows, ...parsed.historyRows] : parsed.historyRows;
+    state.parsedRows += rows.length;
+    const cdRows = rows.filter(x => x.isCd);
+    state.cdRows += cdRows.length;
+    state.pageStats.push({
+        page,
+        rowCount: rows.length,
+        historyRowCount: parsed.historyRows.length,
+        currentRowCount: page === 1 ? parsed.currentRows.length : 0,
+        cdCount: cdRows.length,
+        parseErrorCount: rows.filter(x => x.errors.length).length
+    });
+
+    for (const [index, row] of rows.entries()) {
+        if (row.errors.length) state.parseErrors.push({ page, row: index + 1, titleId: row.titleId, errors: row.errors });
+        if (!row.isCd || !row.titleId || !row.title || !row.artist) continue;
+        const existing = state.records.find(x => x.titleId === row.titleId);
+        if (!existing) {
+            state.records.push({ titleId: row.titleId, title: row.title, artist: row.artist });
+        } else if (existing.title !== row.title || existing.artist !== row.artist) {
+            state.metadataConflicts.push({ titleId: row.titleId, selected: existing, found: { title: row.title, artist: row.artist }, page });
+        }
+    }
+}
+
+async function completeJob(state) {
+    const validationErrors = [];
+    if (state.parsedRows !== state.expectedTotalRows) validationErrors.push(`履歴行数が一致しません。期待 ${state.expectedTotalRows} 件 / 解析 ${state.parsedRows} 件`);
+    if (state.parseErrors.length) validationErrors.push(`解析不能な履歴行が ${state.parseErrors.length} 件あります。`);
+    state.completedAt = new Date().toISOString();
+    state.validationErrors = validationErrors;
+    state.status = validationErrors.length ? "invalid" : "completed";
+    await saveState(state);
+
+    if (!validationErrors.length) {
+        await chrome.storage.local.set({ [RESULT_KEY]: { completedAt: state.completedAt, records: state.records, metadataConflicts: state.metadataConflicts, stats: buildStats(state) } });
+    }
+}
+
+async function handlePageFailure(state, page, error) {
+    const attempt = state.retryPage === page ? state.retryAttempt + 1 : 1;
+    if (attempt > 3) { await failJob(`ページ${page}を3回Retryしましたが取得できませんでした: ${error.message}`); return; }
+    state.status = "retrying";
+    state.retryPage = page;
+    state.retryAttempt = attempt;
+    state.error = error.message;
+    await saveState(state);
+    await scheduleNext([10000, 30000, 60000][attempt - 1]);
+}
+
+async function requestCancel() {
+    const state = await getState();
+    if (!state || !["running", "retrying"].includes(state.status)) return;
+    state.cancelRequested = true;
+    await saveState(state);
+}
+
+async function failJob(message) {
+    const state = await getState();
+    if (!state) return;
+    state.status = "failed";
+    state.error = message;
+    await saveState(state);
+}
+
+function buildStats(state) {
+    return { expectedRows: state.expectedTotalRows, parsedRows: state.parsedRows, cdRows: state.cdRows, uniqueCds: state.records.length, duplicateCdRows: state.cdRows - state.records.length, totalPages: state.totalPages };
+}
+
+function calculateNormalDelay(page) {
+    return page % 10 === 0 ? 2000 + Math.floor(Math.random() * 15001) + 5000 : 2000;
+}
+
+async function scheduleNext(delayMs) {
+    await chrome.alarms.clear(ALARM_NAME);
+    chrome.alarms.create(ALARM_NAME, { when: Date.now() + delayMs });
+}
+
+async function ensureOffscreenDocument() {
+    if (await chrome.offscreen.hasDocument()) return;
+    await chrome.offscreen.createDocument({ url: "offscreen.html", reasons: ["DOM_PARSER"], justification: "DISCASレンタル履歴HTMLをDOMとして安全に解析するため" });
+}
+
+async function resumeInterruptedJob() {
+    const state = await getState();
+    if (state && ["running", "retrying"].includes(state.status)) await scheduleNext(1000);
+}
+
+function normalizeDebugHtmlEncoding(html) {
+    return html
+        .replace(/encoding=["']Windows-31J["']/i, 'encoding="UTF-8"')
+        .replace(/charset\s*=\s*Windows-31J/ig, "charset=UTF-8");
+}
+
+async function getState() { return (await chrome.storage.local.get(STATE_KEY))[STATE_KEY] ?? null; }
+async function saveState(state) { await chrome.storage.local.set({ [STATE_KEY]: state }); }

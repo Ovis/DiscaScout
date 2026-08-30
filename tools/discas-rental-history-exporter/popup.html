@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ja">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Rental History Exporter</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+<main>
+    <h1>レンタル履歴取得</h1>
+    <p id="page-warning" class="warning" hidden>DISCASのレンタル履歴ページを開いてから実行してください。</p>
+    <div id="status" class="status">状態を確認しています…</div>
+    <dl>
+        <div><dt>ページ</dt><dd id="pages">-</dd></div>
+        <div><dt>履歴行</dt><dd id="rows">-</dd></div>
+        <div><dt>CD履歴</dt><dd id="cd-rows">-</dd></div>
+        <div><dt>CD作品</dt><dd id="unique-cds">-</dd></div>
+    </dl>
+    <p id="detail" class="detail"></p>
+    <div class="actions">
+        <button id="start">取得開始</button>
+        <button id="resume" hidden>再開</button>
+        <button id="cancel" class="secondary" hidden>取得を中止</button>
+    </div>
+    <section id="result" hidden>
+        <h2>前回の正常取得結果</h2>
+        <p id="result-summary"></p>
+        <div class="actions">
+            <button id="copy">クリップボードへコピー</button>
+            <button id="download" class="secondary">JSONをダウンロード</button>
+        </div>
+    </section>
+    <section id="debug" hidden>
+        <h2>診断</h2>
+        <p>完全性チェックに失敗しています。この結果はDiscaScoutへのインポート用として扱わないでください。</p>
+        <button id="debug-download" class="danger">診断JSONをダウンロード</button>
+    </section>
+    <section id="html-debug" hidden>
+        <h2>HTMLデバッグ</h2>
+        <p>拡張機能が実際に取得した直近のDISCASレスポンスを保存します。レンタル履歴など個人情報を含む可能性があります。</p>
+        <button id="html-debug-download" class="secondary">取得HTMLをダウンロード</button>
+    </section>
+</main>
+<script type="module" src="popup.js"></script>
+</body>
+</html>

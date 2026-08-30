@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "DiscaScout Rental History Exporter",
+  "version": "1.0.0",
+  "description": "DISCASのレンタル履歴からDiscaScoutインポート用JSONを生成します。",
+  "permissions": ["storage", "tabs", "alarms", "downloads", "offscreen"],
+  "host_permissions": ["https://www.discas.net/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_popup": "popup.html", "default_title": "レンタル履歴を取得" }
+}
