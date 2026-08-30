@@ -1,96 +1,115 @@
+using System.Net;
+using System.Net.Http.Headers;
 using DiscaScout.Core;
 using DiscaScout.Persistence;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
-using System.Net;
-using System.Text;
 
 namespace DiscaScout.Persistence.Tests;
 
 /// <summary>
-/// 画像キャッシュの取得、再利用、失敗時の状態を検証する
+/// ジャケット画像キャッシュの取得・再利用・安全な差し替えをSQLite実プロバイダーで検証する
 /// </summary>
 public sealed class DiscImageCacheServiceTests
 {
     [Fact]
-    public async Task EnsureCachedAsync_画像を保存して相対パスを記録する()
+    public async Task SyncAsync_初回取得後は同じImageUrlを再取得しない()
     {
         await using var database = await TestDatabase.CreateAsync();
-        var root = Path.Combine(Path.GetTempPath(), $"discascout-image-test-{Guid.NewGuid():N}");
-        try
-        {
-            var disc = await AddDiscAsync(database.Context, "1001", "https://example.test/1001.jpg");
-            var handler = new StubHandler(_ => CreateImageResponse("image-data"));
-            var service = CreateService(database.Context, handler, root);
+        var disc = await AddDiscAsync(database.Context, "1001", "https://images.example.test/1001.jpg");
+        using var handler = new RecordingHandler(CreateImageResponse("first"));
+        using var client = new HttpClient(handler);
+        using var directory = new TemporaryDirectory();
+        var service = new DiscImageCacheService(database.Context, client, directory.Path, TimeSpan.Zero);
 
-            var result = await service.EnsureCachedAsync(disc.Id);
+        var first = await service.SyncAsync([disc.DiscasId]);
+        var second = await service.SyncAsync([disc.DiscasId]);
 
-            Assert.True(result);
-            var saved = await database.Context.Discs.SingleAsync();
-            Assert.Equal("1001.jpg", saved.CachedImagePath);
-            Assert.True(File.Exists(Path.Combine(root, "1001.jpg")));
-            Assert.Equal(1, handler.RequestCount);
-        }
-        finally
-        {
-            if (Directory.Exists(root)) Directory.Delete(root, true);
-        }
+        Assert.Equal(1, first.CachedCount);
+        Assert.Equal(1, second.SkippedCount);
+        Assert.Equal(1, handler.RequestCount);
+
+        await database.Context.Entry(disc).ReloadAsync();
+        Assert.NotNull(disc.ImagePath);
+        Assert.True(File.Exists(disc.ImagePath));
+        Assert.Equal("first", await File.ReadAllTextAsync(disc.ImagePath));
     }
 
     [Fact]
-    public async Task EnsureCachedAsync_既存キャッシュがあれば再取得しない()
+    public async Task SyncAsync_ImageUrl変更時は新画像確定後に旧ファイルを削除する()
     {
         await using var database = await TestDatabase.CreateAsync();
-        var root = Path.Combine(Path.GetTempPath(), $"discascout-image-test-{Guid.NewGuid():N}");
-        try
-        {
-            Directory.CreateDirectory(root);
-            await File.WriteAllTextAsync(Path.Combine(root, "1001.jpg"), "cached");
-            var disc = await AddDiscAsync(database.Context, "1001", "https://example.test/1001.jpg");
-            disc.CachedImagePath = "1001.jpg";
-            await database.Context.SaveChangesAsync();
+        var disc = await AddDiscAsync(database.Context, "1001", "https://images.example.test/old.jpg");
+        using var handler = new RecordingHandler(CreateImageResponse("old"), CreateImageResponse("new"));
+        using var client = new HttpClient(handler);
+        using var directory = new TemporaryDirectory();
+        var service = new DiscImageCacheService(database.Context, client, directory.Path, TimeSpan.Zero);
 
-            var handler = new StubHandler(_ => throw new InvalidOperationException("HTTP request should not occur"));
-            var service = CreateService(database.Context, handler, root);
+        await service.SyncAsync([disc.DiscasId]);
+        await database.Context.Entry(disc).ReloadAsync();
+        var oldPath = Assert.IsType<string>(disc.ImagePath);
+        Assert.True(File.Exists(oldPath));
 
-            var result = await service.EnsureCachedAsync(disc.Id);
+        disc.ImageUrl = "https://images.example.test/new.jpg";
+        await database.Context.SaveChangesAsync();
+        var result = await service.SyncAsync([disc.DiscasId]);
 
-            Assert.True(result);
-            Assert.Equal(0, handler.RequestCount);
-        }
-        finally
-        {
-            if (Directory.Exists(root)) Directory.Delete(root, true);
-        }
+        await database.Context.Entry(disc).ReloadAsync();
+        Assert.Equal(1, result.CachedCount);
+        Assert.NotEqual(oldPath, disc.ImagePath);
+        Assert.False(File.Exists(oldPath));
+        Assert.True(File.Exists(disc.ImagePath!));
+        Assert.Equal("new", await File.ReadAllTextAsync(disc.ImagePath!));
     }
 
     [Fact]
-    public async Task EnsureCachedAsync_取得失敗時はキャッシュパスを記録しない()
+    public async Task SyncAsync_新画像取得失敗時は既存ImagePathを維持する()
     {
         await using var database = await TestDatabase.CreateAsync();
-        var root = Path.Combine(Path.GetTempPath(), $"discascout-image-test-{Guid.NewGuid():N}");
-        try
-        {
-            var disc = await AddDiscAsync(database.Context, "1001", "https://example.test/1001.jpg");
-            var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
-            var service = CreateService(database.Context, handler, root);
+        var disc = await AddDiscAsync(database.Context, "1001", "https://images.example.test/old.jpg");
+        using var handler = new RecordingHandler(CreateImageResponse("old"), new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+        using var client = new HttpClient(handler);
+        using var directory = new TemporaryDirectory();
+        var service = new DiscImageCacheService(database.Context, client, directory.Path, TimeSpan.Zero);
 
-            var result = await service.EnsureCachedAsync(disc.Id);
+        await service.SyncAsync([disc.DiscasId]);
+        await database.Context.Entry(disc).ReloadAsync();
+        var oldPath = Assert.IsType<string>(disc.ImagePath);
 
-            Assert.False(result);
-            var saved = await database.Context.Discs.SingleAsync();
-            Assert.Null(saved.CachedImagePath);
-            Assert.Equal(1, handler.RequestCount);
-        }
-        finally
-        {
-            if (Directory.Exists(root)) Directory.Delete(root, true);
-        }
+        disc.ImageUrl = "https://images.example.test/new.jpg";
+        await database.Context.SaveChangesAsync();
+        var result = await service.SyncAsync([disc.DiscasId]);
+
+        await database.Context.Entry(disc).ReloadAsync();
+        Assert.Equal(1, result.FailedCount);
+        Assert.Equal(oldPath, disc.ImagePath);
+        Assert.True(File.Exists(oldPath));
     }
 
-    private static DiscImageCacheService CreateService(DiscaScoutDbContext context, HttpMessageHandler handler, string root) =>
-        new(context, new HttpClient(handler), Options.Create(new DiscaScoutStorageOptions { ImageCachePath = root }));
+    [Fact]
+    public async Task SyncAsync_画像未登録へ変化したらImagePathを解除して旧ファイルを削除する()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        var disc = await AddDiscAsync(database.Context, "1001", "https://images.example.test/old.jpg");
+        using var handler = new RecordingHandler(CreateImageResponse("old"));
+        using var client = new HttpClient(handler);
+        using var directory = new TemporaryDirectory();
+        var service = new DiscImageCacheService(database.Context, client, directory.Path, TimeSpan.Zero);
+
+        await service.SyncAsync([disc.DiscasId]);
+        await database.Context.Entry(disc).ReloadAsync();
+        var oldPath = Assert.IsType<string>(disc.ImagePath);
+
+        disc.ImageUrl = null;
+        await database.Context.SaveChangesAsync();
+        var result = await service.SyncAsync([disc.DiscasId]);
+
+        await database.Context.Entry(disc).ReloadAsync();
+        Assert.Equal(1, result.ClearedCount);
+        Assert.Null(disc.ImagePath);
+        Assert.False(File.Exists(oldPath));
+        Assert.Equal(1, handler.RequestCount);
+    }
 
     private static async Task<Disc> AddDiscAsync(DiscaScoutDbContext context, string discasId, string imageUrl)
     {
@@ -115,25 +134,28 @@ public sealed class DiscImageCacheServiceTests
 
     private static HttpResponseMessage CreateImageResponse(string content)
     {
-        var response = new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = new ByteArrayContent(Encoding.UTF8.GetBytes(content))
-        };
-        response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg");
+        var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(content) };
+        response.Content.Headers.ContentType = new MediaTypeHeaderValue("image/jpeg");
         return response;
     }
 
-    private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> responseFactory) : HttpMessageHandler
+    /// <summary>指定順のHTTPレスポンスを返し、実際の画像リクエスト回数を記録する</summary>
+    private sealed class RecordingHandler(params HttpResponseMessage[] responses) : HttpMessageHandler
     {
+        private readonly Queue<HttpResponseMessage> queue = new(responses);
         public int RequestCount { get; private set; }
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             RequestCount++;
-            return Task.FromResult(responseFactory(request));
+            if (queue.Count == 0) throw new InvalidOperationException("想定外のHTTP要求が発生した");
+            var response = queue.Dequeue();
+            response.RequestMessage = request;
+            return Task.FromResult(response);
         }
     }
 
+    /// <summary>SQLiteインメモリDBを接続期間中維持する</summary>
     private sealed class TestDatabase : IAsyncDisposable
     {
         private TestDatabase(SqliteConnection connection, DiscaScoutDbContext context)
@@ -141,24 +163,34 @@ public sealed class DiscImageCacheServiceTests
             Connection = connection;
             Context = context;
         }
-
         public SqliteConnection Connection { get; }
         public DiscaScoutDbContext Context { get; }
-
         public static async Task<TestDatabase> CreateAsync()
         {
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
             var options = new DbContextOptionsBuilder<DiscaScoutDbContext>().UseSqlite(connection).Options;
-            var context = new DiscaScoutDbContext(options);
-            await context.Database.EnsureCreatedAsync();
-            return new TestDatabase(connection, context);
+            return new TestDatabase(connection, new DiscaScoutDbContext(options));
         }
-
         public async ValueTask DisposeAsync()
         {
             await Context.DisposeAsync();
             await Connection.DisposeAsync();
+        }
+    }
+
+    /// <summary>テストごとに一時画像ディレクトリを作成し、終了時に削除する</summary>
+    private sealed class TemporaryDirectory : IDisposable
+    {
+        public TemporaryDirectory()
+        {
+            Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"discascout-{Guid.NewGuid():N}");
+            Directory.CreateDirectory(Path);
+        }
+        public string Path { get; }
+        public void Dispose()
+        {
+            if (Directory.Exists(Path)) Directory.Delete(Path, recursive: true);
         }
     }
 }
