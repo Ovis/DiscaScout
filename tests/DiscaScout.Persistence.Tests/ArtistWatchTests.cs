@@ -7,136 +7,150 @@ using Microsoft.EntityFrameworkCore;
 namespace DiscaScout.Persistence.Tests;
 
 /// <summary>
-/// Artist Watchの照合と再評価を検証する
+/// Artist Watchの一致状態とInbox再オープン条件を検証する
 /// </summary>
 public sealed class ArtistWatchTests
 {
-    [Fact]
-    public async Task ApplyAsync_Exact一致でArtistMatched理由を追加する()
+    [Theory]
+    [InlineData(ArtistMatchType.Exact, "梶浦由記", true)]
+    [InlineData(ArtistMatchType.Exact, "梶浦由記 / FictionJunction", false)]
+    [InlineData(ArtistMatchType.Contains, "梶浦由記 / FictionJunction", true)]
+    public void Matcher_設定した一致方法で正規化済みArtistを判定する(
+        ArtistMatchType matchType,
+        string discArtist,
+        bool expected)
     {
-        await using var database = await TestDatabase.CreateAsync();
-        database.Context.ArtistSettings.Add(new ArtistSetting
-        {
-            Artist = "Ado",
-            NormalizedArtist = DiscTextNormalizer.Normalize("Ado"),
-            MatchType = ArtistMatchType.Exact,
-            IsWatchEnabled = true
-        });
-        await database.Context.SaveChangesAsync();
-
-        var applier = new DiscasSnapshotApplier(database.Context, new FixedTimeProvider(DateTimeOffset.UtcNow));
-        await applier.ApplyAsync(CreateSnapshot("1001", "作品", "Ado"));
-
-        var disc = await database.Context.Discs.Include(x => x.ReviewReasons).Include(x => x.ArtistMatches).SingleAsync();
-        Assert.Contains(disc.ReviewReasons, x => x.Reason == DiscReviewReasonType.ArtistMatched);
-        Assert.True(disc.ArtistMatches.Single().IsCurrentMatch);
-    }
-
-    [Fact]
-    public async Task ApplyAsync_Exact一致は正規化後の表記で判定する()
-    {
-        await using var database = await TestDatabase.CreateAsync();
-        database.Context.ArtistSettings.Add(new ArtistSetting
-        {
-            Artist = "Ａｄｏ",
-            NormalizedArtist = DiscTextNormalizer.Normalize("Ａｄｏ"),
-            MatchType = ArtistMatchType.Exact,
-            IsWatchEnabled = true
-        });
-        await database.Context.SaveChangesAsync();
-
-        var applier = new DiscasSnapshotApplier(database.Context, new FixedTimeProvider(DateTimeOffset.UtcNow));
-        await applier.ApplyAsync(CreateSnapshot("1001", "作品", "Ado"));
-
-        var disc = await database.Context.Discs.Include(x => x.ReviewReasons).SingleAsync();
-        Assert.Contains(disc.ReviewReasons, x => x.Reason == DiscReviewReasonType.ArtistMatched);
-    }
-
-    [Fact]
-    public async Task ApplyAsync_Contains一致で部分一致する()
-    {
-        await using var database = await TestDatabase.CreateAsync();
-        database.Context.ArtistSettings.Add(new ArtistSetting
-        {
-            Artist = "Ado",
-            NormalizedArtist = DiscTextNormalizer.Normalize("Ado"),
-            MatchType = ArtistMatchType.Contains,
-            IsWatchEnabled = true
-        });
-        await database.Context.SaveChangesAsync();
-
-        var applier = new DiscasSnapshotApplier(database.Context, new FixedTimeProvider(DateTimeOffset.UtcNow));
-        await applier.ApplyAsync(CreateSnapshot("1001", "作品", "Ado feat. 初音ミク"));
-
-        var disc = await database.Context.Discs.Include(x => x.ReviewReasons).SingleAsync();
-        Assert.Contains(disc.ReviewReasons, x => x.Reason == DiscReviewReasonType.ArtistMatched);
-    }
-
-    [Fact]
-    public async Task ApplyAsync_無効なWatchは一致理由を追加しない()
-    {
-        await using var database = await TestDatabase.CreateAsync();
-        database.Context.ArtistSettings.Add(new ArtistSetting
-        {
-            Artist = "Ado",
-            NormalizedArtist = DiscTextNormalizer.Normalize("Ado"),
-            MatchType = ArtistMatchType.Exact,
-            IsWatchEnabled = false
-        });
-        await database.Context.SaveChangesAsync();
-
-        var applier = new DiscasSnapshotApplier(database.Context, new FixedTimeProvider(DateTimeOffset.UtcNow));
-        await applier.ApplyAsync(CreateSnapshot("1001", "作品", "Ado"));
-
-        var disc = await database.Context.Discs.Include(x => x.ReviewReasons).SingleAsync();
-        Assert.DoesNotContain(disc.ReviewReasons, x => x.Reason == DiscReviewReasonType.ArtistMatched);
-    }
-
-    [Fact]
-    public async Task ReevaluateAsync_Watch追加後に既存CDを再評価する()
-    {
-        await using var database = await TestDatabase.CreateAsync();
-        database.Context.Discs.Add(CreateDisc("1001", "作品", "Ado"));
-        await database.Context.SaveChangesAsync();
-
         var setting = new ArtistSetting
         {
-            Artist = "Ado",
-            NormalizedArtist = DiscTextNormalizer.Normalize("Ado"),
-            MatchType = ArtistMatchType.Exact,
-            IsWatchEnabled = true
+            Artist = "梶浦由記",
+            NormalizedArtist = DiscTextNormalizer.Normalize("梶浦由記"),
+            MatchType = matchType
         };
-        database.Context.ArtistSettings.Add(setting);
+
+        Assert.Equal(expected, ArtistWatchMatcher.IsMatch(DiscTextNormalizer.Normalize(discArtist), setting));
+    }
+
+    [Fact]
+    public async Task CreateAsync_既存一致CDは履歴へ登録するが指定なしではInboxを再オープンしない()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        var disc = CreateDisc("1001", "作品1", "梶浦由記");
+        disc.NeedsReview = false;
+        disc.LastReviewedAt = DateTime.UtcNow;
+        database.Context.Discs.Add(disc);
         await database.Context.SaveChangesAsync();
 
-        await ArtistWatchService.ReevaluateAsync(database.Context, setting.Id, DateTime.UtcNow);
+        var service = new ArtistWatchService(database.Context, new FixedTimeProvider(new DateTimeOffset(2026, 8, 29, 0, 0, 0, TimeSpan.Zero)));
+        var setting = await service.CreateAsync("梶浦由記", ArtistMatchType.Exact, true, false, false);
 
-        var saved = await database.Context.Discs.Include(x => x.ReviewReasons).Include(x => x.ArtistMatches).SingleAsync();
+        var saved = await database.Context.Discs
+            .Include(x => x.ArtistMatches)
+            .Include(x => x.ReviewReasons)
+            .SingleAsync();
+        Assert.False(saved.NeedsReview);
+        Assert.DoesNotContain(saved.ReviewReasons, x => x.Reason == DiscReviewReasonType.ArtistMatched);
+        Assert.Contains(saved.ArtistMatches, x => x.ArtistSettingId == setting.Id && x.IsCurrentMatch);
+    }
+
+    [Fact]
+    public async Task CreateAsync_既存一致CDを戻す指定ではArtistMatched理由を追加する()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        var disc = CreateDisc("1001", "作品1", "梶浦由記");
+        disc.NeedsReview = false;
+        database.Context.Discs.Add(disc);
+        await database.Context.SaveChangesAsync();
+
+        var service = new ArtistWatchService(database.Context, new FixedTimeProvider(DateTimeOffset.UtcNow));
+        await service.CreateAsync("梶浦由記", ArtistMatchType.Exact, true, false, true);
+
+        var saved = await database.Context.Discs.Include(x => x.ReviewReasons).SingleAsync();
+        Assert.True(saved.NeedsReview);
+        Assert.Contains(saved.ReviewReasons, x => x.Reason == DiscReviewReasonType.ArtistMatched);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_新規Watch一致はArtistMatchedを付与し再取得では重複させない()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        database.Context.ArtistSettings.Add(new ArtistSetting
+        {
+            Artist = "梶浦由記",
+            NormalizedArtist = DiscTextNormalizer.Normalize("梶浦由記"),
+            MatchType = ArtistMatchType.Exact,
+            IsWatchEnabled = true
+        });
+        await database.Context.SaveChangesAsync();
+
+        var applier = new DiscasSnapshotApplier(database.Context, new FixedTimeProvider(DateTimeOffset.UtcNow));
+        var snapshot = CreateSnapshot("1001", "作品1", "梶浦由記");
+        await applier.ApplyAsync(snapshot);
+        await applier.ApplyAsync(snapshot);
+
+        var saved = await database.Context.Discs
+            .Include(x => x.ArtistMatches)
+            .Include(x => x.ReviewReasons)
+            .SingleAsync();
+        Assert.Single(saved.ArtistMatches);
+        Assert.True(saved.ArtistMatches.Single().IsCurrentMatch);
+        Assert.Single(saved.ReviewReasons, x => x.Reason == DiscReviewReasonType.ArtistMatched);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_Artist変更で新規一致した場合だけArtistMatchedで再オープンする()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        database.Context.ArtistSettings.Add(new ArtistSetting
+        {
+            Artist = "梶浦由記",
+            NormalizedArtist = DiscTextNormalizer.Normalize("梶浦由記"),
+            MatchType = ArtistMatchType.Exact,
+            IsWatchEnabled = true
+        });
+        await database.Context.SaveChangesAsync();
+
+        var applier = new DiscasSnapshotApplier(database.Context, new FixedTimeProvider(DateTimeOffset.UtcNow));
+        await applier.ApplyAsync(CreateSnapshot("1001", "作品1", "別アーティスト"));
+
+        var disc = await database.Context.Discs.Include(x => x.ReviewReasons).SingleAsync();
+        disc.ReviewReasons.Clear();
+        disc.NeedsReview = false;
+        await database.Context.SaveChangesAsync();
+
+        await applier.ApplyAsync(CreateSnapshot("1001", "作品1", "梶浦由記"));
+
+        var saved = await database.Context.Discs
+            .Include(x => x.ArtistMatches)
+            .Include(x => x.ReviewReasons)
+            .SingleAsync();
+        Assert.True(saved.NeedsReview);
         Assert.Contains(saved.ReviewReasons, x => x.Reason == DiscReviewReasonType.ArtistMatched);
         Assert.True(saved.ArtistMatches.Single().IsCurrentMatch);
     }
 
     [Fact]
-    public async Task ReevaluateAsync_レンタル済みCDは一致しても未チェックへ戻さない()
+    public async Task ApplyAsync_レンタル済みCDが新規一致してもInboxは再オープンしない()
     {
         await using var database = await TestDatabase.CreateAsync();
-        var disc = CreateDisc("1001", "作品", "Ado");
-        disc.IsRented = true;
-        disc.NeedsReview = false;
-        database.Context.Discs.Add(disc);
-        var setting = new ArtistSetting
+        database.Context.ArtistSettings.Add(new ArtistSetting
         {
-            Artist = "Ado",
-            NormalizedArtist = DiscTextNormalizer.Normalize("Ado"),
+            Artist = "梶浦由記",
+            NormalizedArtist = DiscTextNormalizer.Normalize("梶浦由記"),
             MatchType = ArtistMatchType.Exact,
             IsWatchEnabled = true
-        };
-        database.Context.ArtistSettings.Add(setting);
+        });
+        var disc = CreateDisc("1001", "作品1", "別アーティスト");
+        disc.IsRented = true;
+        database.Context.Discs.Add(disc);
         await database.Context.SaveChangesAsync();
 
-        await ArtistWatchService.ReevaluateAsync(database.Context, setting.Id, DateTime.UtcNow);
+        var applier = new DiscasSnapshotApplier(database.Context, new FixedTimeProvider(DateTimeOffset.UtcNow));
+        await applier.ApplyAsync(CreateSnapshot("1001", "作品1", "梶浦由記"));
 
-        var saved = await database.Context.Discs.Include(x => x.ReviewReasons).Include(x => x.ArtistMatches).SingleAsync();
+        var saved = await database.Context.Discs
+            .Include(x => x.ArtistMatches)
+            .Include(x => x.ReviewReasons)
+            .SingleAsync();
         Assert.False(saved.NeedsReview);
         Assert.DoesNotContain(saved.ReviewReasons, x => x.Reason == DiscReviewReasonType.ArtistMatched);
         Assert.True(saved.ArtistMatches.Single().IsCurrentMatch);
@@ -163,20 +177,22 @@ public sealed class ArtistWatchTests
     {
         var product = new ScrapedDisc(
             id,
-            $"https://example.test/{id}",
+            $"https://example.test/goodsDetail.do?titleID={id}",
             title,
             artist,
             "J-POP",
             "J-POP",
             null,
-            null,
+            $"https://example.test/{id}.jpg",
             null,
             DiscSourceCategory.New,
             1);
         return new DiscasCategorySnapshot(DiscSourceCategory.New, 1, 1, [product]);
     }
 
-    /// <summary>SQLiteのインメモリDBをテスト中維持する</summary>
+    /// <summary>
+    /// SQLite実プロバイダーをメモリ上で維持するArtist Watchテスト用DB
+    /// </summary>
     private sealed class TestDatabase : IAsyncDisposable
     {
         private TestDatabase(SqliteConnection connection, DiscaScoutDbContext context)
@@ -192,7 +208,9 @@ public sealed class ArtistWatchTests
         {
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
-            var options = new DbContextOptionsBuilder<DiscaScoutDbContext>().UseSqlite(connection).Options;
+            var options = new DbContextOptionsBuilder<DiscaScoutDbContext>()
+                .UseSqlite(connection)
+                .Options;
             var context = new DiscaScoutDbContext(options);
             await context.Database.EnsureCreatedAsync();
             return new TestDatabase(connection, context);
@@ -205,7 +223,9 @@ public sealed class ArtistWatchTests
         }
     }
 
-    /// <summary>状態遷移検証用に現在時刻を固定する</summary>
+    /// <summary>
+    /// テスト中の一致時刻を固定する
+    /// </summary>
     private sealed class FixedTimeProvider(DateTimeOffset value) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => value;
