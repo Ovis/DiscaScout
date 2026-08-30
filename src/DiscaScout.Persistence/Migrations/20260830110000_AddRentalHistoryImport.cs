@@ -10,6 +10,13 @@ public partial class AddRentalHistoryImport : Migration
     /// <inheritdoc />
     protected override void Up(MigrationBuilder migrationBuilder)
     {
+        migrationBuilder.AddColumn<string>(
+            name: "DetailImageUrl",
+            table: "Discs",
+            type: "TEXT",
+            maxLength: 2048,
+            nullable: true);
+
         migrationBuilder.AddColumn<DateTime>(
             name: "RentalHistoryImportedAt",
             table: "Discs",
@@ -26,6 +33,7 @@ public partial class AddRentalHistoryImport : Migration
     protected override void Down(MigrationBuilder migrationBuilder)
     {
         migrationBuilder.DropIndex(name: "IX_Discs_RentalHistoryImportedAt", table: "Discs");
+        migrationBuilder.DropColumn(name: "DetailImageUrl", table: "Discs");
         migrationBuilder.DropColumn(name: "RentalHistoryImportedAt", table: "Discs");
     }
 }
