@@ -344,18 +344,12 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
         return query;
     }
 
-    private static IQueryable<Disc> ApplyRentalFilter(IQueryable<Disc> query, string rental)
+    private static IQueryable<Disc> ApplyRentalFilter(IQueryable<Disc> query, string rental) => rental switch
     {
-        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeBySystemTimeZoneId(TimeProvider.System.GetUtcNow(), "Asia/Tokyo").DateTime);
-        return rental switch
-        {
-            "upcoming" => query.Where(x => x.RentalStartDate != null && x.RentalStartDate > today),
-            "new" => query.Where(x => x.RentalStartDate != null && x.RentalStartDate <= today && x.RentalStartDate >= today.AddDays(-90)),
-            "semi-new" => query.Where(x => x.RentalStartDate != null && x.RentalStartDate < today.AddDays(-90) && x.RentalStartDate >= today.AddDays(-180)),
-            "old" => query.Where(x => x.RentalStartDate != null && x.RentalStartDate < today.AddDays(-180)),
-            _ => query
-        };
-    }
+        "unrented" => query.Where(x => !x.IsRented),
+        "rented" => query.Where(x => x.IsRented),
+        _ => query
+    };
 
     private static IQueryable<Disc> ApplySort(IQueryable<Disc> query, string sort, string order)
     {
@@ -393,7 +387,7 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
     {
         tab = new[] { "unchecked", "pickup", "rented", "all" }.Contains(tab) ? tab : "unchecked";
         uncheckedFilter = new[] { "all", "upcoming", "new", "artist-watch" }.Contains(uncheckedFilter) ? uncheckedFilter : "all";
-        rental = new[] { "all", "upcoming", "new", "semi-new", "old" }.Contains(rental) ? rental : "all";
+        rental = new[] { "all", "unrented", "rented" }.Contains(rental) ? rental : "all";
 
         // 旧URLの rental-asc / rental-desc は既存ブックマークを壊さないよう新しい sort + order 形式へ読み替える。
         if (sort is "rental-asc" or "rental-desc")
