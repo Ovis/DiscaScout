@@ -27,6 +27,36 @@ public sealed partial class DiscDetailMetadataService(DiscaScoutDbContext dbCont
         return new DiscDetailFetchProgress(total, dueNow, retryCooldown, waitingForRentalStart);
     }
 
+    /// <summary>
+    /// #38の不正な詳細ジャンル解析で汚染されたレンタル履歴由来CDを未取得状態へ戻し、再取得対象にする
+    /// </summary>
+    /// <returns>修復対象として初期化したCD件数</returns>
+    public async Task<int> RepairCorruptedImportedGenresAsync(CancellationToken cancellationToken = default)
+    {
+        // 通常のDISCASジャンル名として成立しない長さや、ページナビゲーション・JavaScript断片を含むものだけを対象にする。
+        // レンタル履歴インポート由来に限定し、通常クロールで取得した既存ジャンルへ影響させない。
+        var corrupted = dbContext.Discs
+            .Where(x => x.RentalHistoryImportedAt != null && x.GenreLarge != "未取得")
+            .Where(x => x.GenreLarge.Length > 200
+                || x.GenreLarge.Contains("すべてのジャンル")
+                || x.GenreLarge.Contains("document.")
+                || x.GenreLarge.Contains("function(")
+                || x.GenreLarge.Contains("javascript"));
+
+        var repaired = await corrupted.ExecuteUpdateAsync(setters => setters
+            .SetProperty(x => x.GenreLarge, "未取得")
+            .SetProperty(x => x.GenreMiddle, (string?)null)
+            .SetProperty(x => x.GenreSmall, (string?)null)
+            .SetProperty(x => x.DetailFetchedAt, (DateTime?)null)
+            .SetProperty(x => x.DetailLastAttemptAt, (DateTime?)null)
+            .SetProperty(x => x.DetailRefreshCompleted, false), cancellationToken);
+
+        if (repaired > 0)
+            logger.LogWarning("不正な詳細ジャンルを検出したため再取得対象へ戻しました: Count={Count}", repaired);
+
+        return repaired;
+    }
+
     /// <summary>現在取得すべき詳細情報があるCDを1件返す</summary>
     public async Task<long?> GetNextDueDiscIdAsync(CancellationToken cancellationToken = default)
     {
