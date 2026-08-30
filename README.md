@@ -9,6 +9,7 @@
 - [current-state.md](current-state.md) — **最初に読む文書**。現在の実装状態、確定済み仕様、最近の PR、未実装事項、次セッションへの引き継ぎ
 - [architecture.md](architecture.md) — システム全体の目的、アーキテクチャ、データモデル、状態遷移、バックグラウンド処理、UI 方針
 - [discas-scraping.md](discas-scraping.md) — TSUTAYA DISCAS の検索ページに関する実地調査結果とスクレイピング仕様
+- [genre-master.md](genre-master.md) — DISCAS ジャンルマスター、`G` パラメータによる階層、CD へのジャンル解決、一覧の連動ジャンルフィルター
 - [scraping-policy.md](scraping-policy.md) — DISCAS へのアクセス負荷制御、ジャンル取得、追加リクエスト抑制に関する必須方針
 - [discas-live-verification-2026-08-29.md](discas-live-verification-2026-08-29.md) — 2026-08-29 に実施した全ジャンル実クロールの検証記録
 
@@ -24,4 +25,4 @@
 
 ## Scope
 
-現在の文書は、**2026-08-30 / PR #24 merge 後**までに行った設計検討、実装、TSUTAYA DISCAS 実ページの調査を基にしています。
+現在の文書は 2026-08-30 時点の設計・実装・TSUTAYA DISCAS 実ページ調査を基にしています。ジャンルマスター正規化は PR #40 まで反映済みです。
