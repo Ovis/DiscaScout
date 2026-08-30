@@ -105,6 +105,19 @@ public sealed class DiscDetailMetadataService(
             var detail = parser.Parse(result.Html, result.FinalUri);
             var fetchedAt = clock.GetUtcNow().UtcDateTime;
             var today = GetJapanToday(fetchedAt);
+
+            // 履歴だけから新規作成したDiscのタイトル・アーティストはインポートJSON由来の仮値である。
+            // 通常クロール済みDiscまで詳細ページで上書きしないよう、履歴作成時の「未取得」ジャンルを持つ場合だけ
+            // 詳細ページを正式値として採用する。後から通常クロールされた場合は先にジャンルも更新されるため対象外になる。
+            if (disc.RentalHistoryImportedAt is not null && disc.GenreLarge == "未取得")
+            {
+                disc.Title = detail.Title;
+                disc.NormalizedTitle = DiscTextNormalizer.Normalize(detail.Title);
+                disc.Artist = detail.Artist;
+                disc.NormalizedArtist = DiscTextNormalizer.Normalize(detail.Artist);
+                disc.IsMaxiSingle = detail.Title.StartsWith("【MAXI】", StringComparison.Ordinal);
+            }
+
             disc.RentalStartDate = detail.RentalStartDate;
             disc.Description = detail.Description;
             disc.IsTwoDisc = detail.IsTwoDisc;
