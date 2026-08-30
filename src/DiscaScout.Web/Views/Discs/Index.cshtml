@@ -186,10 +186,17 @@
             <label>
                 並び順
                 <select name="sort">
-                    <option value="updated" selected="@(Model.Sort == "updated")">更新が新しい順</option>
-                    <option value="rental" selected="@(Model.Sort == "rental")">レンタル開始日順</option>
-                    <option value="title" selected="@(Model.Sort == "title")">タイトル順</option>
-                    <option value="artist" selected="@(Model.Sort == "artist")">アーティスト順</option>
+                    <option value="updated" selected="@(Model.Sort == "updated")">更新日時</option>
+                    <option value="rental" selected="@(Model.Sort == "rental")">レンタル開始日</option>
+                    <option value="title" selected="@(Model.Sort == "title")">タイトル</option>
+                    <option value="artist" selected="@(Model.Sort == "artist")">アーティスト</option>
+                </select>
+            </label>
+            <label>
+                方向
+                <select name="order">
+                    <option value="desc" selected="@(Model.Order == "desc")">降順</option>
+                    <option value="asc" selected="@(Model.Order == "asc")">昇順</option>
                 </select>
             </label>
             <label>

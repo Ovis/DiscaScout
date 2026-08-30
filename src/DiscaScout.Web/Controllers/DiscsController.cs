@@ -29,11 +29,12 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
         [FromQuery(Name = "excludeAlbum")] bool excludeAlbum = false,
         [FromQuery(Name = "rental")] string rental = "all",
         [FromQuery(Name = "sort")] string sort = "updated",
+        [FromQuery(Name = "order")] string order = "desc",
         [FromQuery(Name = "size")] int pageSize = 50,
         [FromQuery(Name = "p")] int pageNumber = 1,
         CancellationToken cancellationToken = default)
     {
-        NormalizeInputs(ref tab, ref uncheckedFilter, ref titleSearch, ref artistSearch, ref rental, ref sort, ref pageSize, ref pageNumber);
+        NormalizeInputs(ref tab, ref uncheckedFilter, ref titleSearch, ref artistSearch, ref rental, ref sort, ref order, ref pageSize, ref pageNumber);
         var genreGroups = await LoadGenreGroupsAsync(cancellationToken);
         NormalizeGenreSelection(genreGroups, ref genreLargeId, ref genreMiddleId, ref genreSmallId);
 
@@ -58,7 +59,7 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
         query = ApplySearch(query, titleSearch, searchDescription, searchTracks, artistSearch, descendantGenreIds);
         query = ApplyFormatFilter(query, excludeMaxi, excludeAlbum);
         query = ApplyRentalFilter(query, rental);
-        query = ApplySort(query, sort);
+        query = ApplySort(query, sort, order);
 
         var totalCount = await query.CountAsync(cancellationToken);
         var totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)pageSize));
@@ -80,6 +81,7 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
             ExcludeAlbum = excludeAlbum,
             Rental = rental,
             Sort = sort,
+            Order = order,
             PageSize = pageSize,
             PageNumber = pageNumber,
             Items = items,
@@ -355,13 +357,21 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
         };
     }
 
-    private static IQueryable<Disc> ApplySort(IQueryable<Disc> query, string sort) => sort switch
+    private static IQueryable<Disc> ApplySort(IQueryable<Disc> query, string sort, string order)
     {
-        "rental-asc" => query.OrderBy(x => x.RentalStartDate == null).ThenBy(x => x.RentalStartDate).ThenBy(x => x.Id),
-        "rental-desc" => query.OrderBy(x => x.RentalStartDate == null).ThenByDescending(x => x.RentalStartDate).ThenBy(x => x.Id),
-        "title" => query.OrderBy(x => x.NormalizedTitle).ThenBy(x => x.Id),
-        _ => query.OrderByDescending(x => x.LastUpdatedAt).ThenByDescending(x => x.Id)
-    };
+        var descending = order == "desc";
+        return sort switch
+        {
+            "rental" when descending => query.OrderBy(x => x.RentalStartDate == null).ThenByDescending(x => x.RentalStartDate).ThenByDescending(x => x.Id),
+            "rental" => query.OrderBy(x => x.RentalStartDate == null).ThenBy(x => x.RentalStartDate).ThenBy(x => x.Id),
+            "title" when descending => query.OrderByDescending(x => x.NormalizedTitle).ThenByDescending(x => x.Id),
+            "title" => query.OrderBy(x => x.NormalizedTitle).ThenBy(x => x.Id),
+            "artist" when descending => query.OrderByDescending(x => x.NormalizedArtist).ThenByDescending(x => x.NormalizedTitle).ThenByDescending(x => x.Id),
+            "artist" => query.OrderBy(x => x.NormalizedArtist).ThenBy(x => x.NormalizedTitle).ThenBy(x => x.Id),
+            _ when descending => query.OrderByDescending(x => x.LastUpdatedAt).ThenByDescending(x => x.Id),
+            _ => query.OrderBy(x => x.LastUpdatedAt).ThenBy(x => x.Id)
+        };
+    }
 
     private static bool HasSearchFilters(string? title, string? artist, long? genreId, bool excludeMaxi, bool excludeAlbum) =>
         !string.IsNullOrWhiteSpace(title) || !string.IsNullOrWhiteSpace(artist) || genreId.HasValue || excludeMaxi || excludeAlbum;
@@ -377,13 +387,22 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
         ref string? artistSearch,
         ref string rental,
         ref string sort,
+        ref string order,
         ref int pageSize,
         ref int pageNumber)
     {
         tab = new[] { "unchecked", "pickup", "rented", "all" }.Contains(tab) ? tab : "unchecked";
         uncheckedFilter = new[] { "all", "upcoming", "new", "artist-watch" }.Contains(uncheckedFilter) ? uncheckedFilter : "all";
         rental = new[] { "all", "upcoming", "new", "semi-new", "old" }.Contains(rental) ? rental : "all";
-        sort = new[] { "updated", "rental-asc", "rental-desc", "title" }.Contains(sort) ? sort : "updated";
+
+        // 旧URLの rental-asc / rental-desc は既存ブックマークを壊さないよう新しい sort + order 形式へ読み替える。
+        if (sort is "rental-asc" or "rental-desc")
+        {
+            order = sort.EndsWith("desc", StringComparison.Ordinal) ? "desc" : "asc";
+            sort = "rental";
+        }
+        sort = new[] { "updated", "rental", "title", "artist" }.Contains(sort) ? sort : "updated";
+        order = new[] { "asc", "desc" }.Contains(order) ? order : "desc";
         pageSize = new[] { 20, 50, 100, 200 }.Contains(pageSize) ? pageSize : 50;
         pageNumber = Math.Max(1, pageNumber);
         titleSearch = string.IsNullOrWhiteSpace(titleSearch) ? null : titleSearch.Trim();
