@@ -13,10 +13,11 @@ namespace DiscaScout.Web.Controllers;
 [Route("discs")]
 public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
 {
-    /// <summary>未チェック、Pickup、全件のCD一覧を表示する</summary>
+    /// <summary>未チェック、Pickup、レンタル済み、全件のCD一覧を表示する</summary>
     [HttpGet("")]
     public async Task<IActionResult> Index(
         [FromQuery(Name = "tab")] string tab = "unchecked",
+        [FromQuery(Name = "uncheckedFilter")] string uncheckedFilter = "all",
         [FromQuery(Name = "title")] string? titleSearch = null,
         [FromQuery(Name = "searchDescription")] bool searchDescription = false,
         [FromQuery(Name = "searchTracks")] bool searchTracks = false,
@@ -30,10 +31,11 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
         [FromQuery(Name = "p")] int pageNumber = 1,
         CancellationToken cancellationToken = default)
     {
-        NormalizeInputs(ref tab, ref titleSearch, ref artistSearch, ref genre, ref rental, ref sort, ref pageSize, ref pageNumber);
+        NormalizeInputs(ref tab, ref uncheckedFilter, ref titleSearch, ref artistSearch, ref genre, ref rental, ref sort, ref pageSize, ref pageNumber);
 
         var uncheckedCount = await dbContext.Discs.CountAsync(IsUnchecked(), cancellationToken);
         var pickupCount = await dbContext.Discs.CountAsync(x => x.ArtistMatches.Any(m => m.IsCurrentMatch && !m.ArtistSetting.IsArchived && m.ArtistSetting.IsWatchEnabled), cancellationToken);
+        var rentedCount = await dbContext.Discs.CountAsync(x => x.IsRented && !x.IsArchived, cancellationToken);
         var genreGroups = await LoadGenreGroupsAsync(cancellationToken);
 
         var query = dbContext.Discs.AsNoTracking()
@@ -42,6 +44,7 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
             .Include(x => x.ArtistMatches).ThenInclude(x => x.ArtistSetting)
             .AsQueryable();
         query = ApplyTab(query, tab, HasSearchFilters(titleSearch, artistSearch, genre, excludeMaxi, excludeAlbum));
+        query = ApplyUncheckedFilter(query, tab, uncheckedFilter);
         query = ApplySearch(query, titleSearch, searchDescription, searchTracks, artistSearch, genre);
         query = ApplyFormatFilter(query, excludeMaxi, excludeAlbum);
         query = ApplyRentalFilter(query, rental);
@@ -55,6 +58,7 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
         return View(new DiscsViewModel
         {
             Tab = tab,
+            UncheckedFilter = uncheckedFilter,
             TitleSearch = titleSearch,
             SearchDescription = searchDescription,
             SearchTracks = searchTracks,
@@ -70,6 +74,7 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
             GenreGroups = genreGroups,
             UncheckedCount = uncheckedCount,
             PickupCount = pickupCount,
+            RentedCount = rentedCount,
             TotalCount = totalCount,
             StatusMessage = TempData[nameof(DiscsViewModel.StatusMessage)] as string,
             UndoPayload = TempData[nameof(DiscsViewModel.UndoPayload)] as string
@@ -220,6 +225,7 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
     private static IQueryable<Disc> ApplyTab(IQueryable<Disc> query, string tab, bool hasSearchFilters) => tab switch
     {
         "pickup" => query.Where(x => x.ArtistMatches.Any(m => m.IsCurrentMatch && !m.ArtistSetting.IsArchived && m.ArtistSetting.IsWatchEnabled)),
+        "rented" => query.Where(x => x.IsRented && !x.IsArchived),
         "all" when hasSearchFilters => query,
         "all" => query.Where(x => !x.IsArchived),
         _ => query.Where(IsUnchecked())
@@ -227,6 +233,21 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
 
     private static System.Linq.Expressions.Expression<Func<Disc, bool>> IsUnchecked() =>
         x => x.NeedsReview && !x.IsRented && (!x.IsArchived || x.ArtistCatalogEntries.Any(c => c.IsActive));
+
+    private static IQueryable<Disc> ApplyUncheckedFilter(IQueryable<Disc> query, string tab, string filter)
+    {
+        // 未チェック固有の絞り込みなので、他タブへ移動した際に同じ条件が意図せず適用されないようにする。
+        if (tab != "unchecked") return query;
+
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeBySystemTimeZoneId(TimeProvider.System.GetUtcNow(), "Asia/Tokyo").DateTime);
+        return filter switch
+        {
+            "upcoming" => query.Where(x => x.RentalStartDate != null && x.RentalStartDate > today),
+            "new" => query.Where(x => x.ReviewReasons.Any(r => r.Reason == DiscReviewReasonType.New)),
+            "artist-watch" => query.Where(x => x.ReviewReasons.Any(r => r.Reason == DiscReviewReasonType.ArtistMatched)),
+            _ => query
+        };
+    }
 
     private static IQueryable<Disc> ApplySearch(
         IQueryable<Disc> query,
@@ -289,9 +310,10 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
         ? []
         : value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-    private static void NormalizeInputs(ref string tab, ref string? titleSearch, ref string? artistSearch, ref string? genre, ref string rental, ref string sort, ref int pageSize, ref int pageNumber)
+    private static void NormalizeInputs(ref string tab, ref string uncheckedFilter, ref string? titleSearch, ref string? artistSearch, ref string? genre, ref string rental, ref string sort, ref int pageSize, ref int pageNumber)
     {
-        if (tab is not ("unchecked" or "pickup" or "all")) tab = "unchecked";
+        if (tab is not ("unchecked" or "pickup" or "rented" or "all")) tab = "unchecked";
+        if (uncheckedFilter is not ("all" or "upcoming" or "new" or "artist-watch")) uncheckedFilter = "all";
         if (rental is not ("all" or "rented" or "unrented")) rental = "all";
         if (sort is not ("updated" or "rental" or "title" or "artist")) sort = "updated";
         if (pageSize is not (50 or 100 or 200)) pageSize = 50;
