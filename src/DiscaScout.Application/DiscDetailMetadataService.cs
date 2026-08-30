@@ -62,10 +62,17 @@ public sealed partial class DiscDetailMetadataService(DiscaScoutDbContext dbCont
             if (result.StatusCode is < HttpStatusCode.OK or >= HttpStatusCode.MultipleChoices) throw new HttpRequestException($"DISCAS詳細ページの取得に失敗した: {(int)result.StatusCode} {result.StatusCode}");
             var detail = parser.Parse(result.Html, result.FinalUri); var fetchedAt = clock.GetUtcNow().UtcDateTime; var today = GetJapanToday(fetchedAt);
 
-            // 履歴だけから新規作成したDiscのタイトル・アーティストはインポートJSON由来の仮値であるため、未取得ジャンルの場合だけ詳細ページを正式値として採用する。
+            // 履歴だけから新規作成したDiscのタイトル・アーティスト・ジャンルはインポートJSON由来の仮値であるため、
+            // 未取得ジャンルのDiscだけ詳細ページから得た正式値で補完する。
             if (disc.RentalHistoryImportedAt is not null && disc.GenreLarge == "未取得")
             {
                 disc.Title = detail.Title; disc.NormalizedTitle = DiscTextNormalizer.Normalize(detail.Title); disc.Artist = detail.Artist; disc.NormalizedArtist = DiscTextNormalizer.Normalize(detail.Artist); disc.IsMaxiSingle = detail.Title.StartsWith("【MAXI】", StringComparison.Ordinal);
+                if (!string.IsNullOrWhiteSpace(detail.GenreLarge))
+                {
+                    disc.GenreLarge = detail.GenreLarge;
+                    disc.GenreMiddle = null;
+                    disc.GenreSmall = null;
+                }
             }
 
             disc.RentalStartDate = detail.RentalStartDate; disc.Description = detail.Description; disc.IsTwoDisc = detail.IsTwoDisc;
