@@ -29,7 +29,6 @@ public sealed class RentalHistoryPersistenceTests
             NormalizedTitle = DiscTextNormalizer.Normalize("断絶"),
             Artist = "井上陽水",
             NormalizedArtist = DiscTextNormalizer.Normalize("井上陽水"),
-            GenreLarge = "未取得",
             FirstSeenAt = now,
             LastSeenAt = now,
             LastUpdatedAt = now,

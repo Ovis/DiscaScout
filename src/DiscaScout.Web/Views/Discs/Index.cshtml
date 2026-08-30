@@ -6,6 +6,9 @@
     var rentablePageItems = Model.Items.Where(x => !x.IsRented).ToArray();
     var firstPagerPage = Math.Max(1, Model.PageNumber - 2);
     var lastPagerPage = Math.Min(Model.TotalPages, Model.PageNumber + 2);
+    var selectedLarge = Model.GenreGroups.SingleOrDefault(x => x.Id == Model.GenreLargeId);
+    var selectedMiddle = selectedLarge?.Children.SingleOrDefault(x => x.Id == Model.GenreMiddleId);
+    var genreGroupsJson = System.Text.Json.JsonSerializer.Serialize(Model.GenreGroups);
 }
 <!doctype html>
 <html lang="ja">
@@ -35,7 +38,8 @@
         .format-options label.checkbox { padding-bottom: 0; font-weight: 500; }
         input[type=text], select { padding: 8px; border: 1px solid #c9ced6; border-radius: 6px; background: white; }
         input[type=text] { width: 230px; }
-        select.genre { min-width: 180px; }
+        select.genre { min-width: 160px; }
+        .genre-filters { display: flex; gap: 7px; }
         .filters > button { margin-top: 19px; }
         button { border: 0; border-radius: 6px; padding: 8px 12px; background: #273142; color: white; font-weight: 650; cursor: pointer; }
         button:disabled { opacity: .45; cursor: not-allowed; }
@@ -126,26 +130,44 @@
                 </div>
             </div>
             <label>アーティスト<input type="text" name="artist" value="@Model.ArtistSearch" /></label>
-            <label>
-                ジャンル
-                <select class="genre" name="genre">
-                    <option value="">すべて</option>
-                    @foreach (var lg in Model.GenreGroups)
-                    {
-                        <optgroup label="@lg.Name">
-                            <option value="@lg.Name" selected="@(Model.Genre == lg.Name)">@lg.Name（すべて）</option>
-                            @foreach (var mg in lg.MiddleGenres)
+            <div class="genre-filters">
+                <label>
+                    大ジャンル
+                    <select class="genre" name="genreLarge" id="genre-large">
+                        <option value="">すべて</option>
+                        @foreach (var genre in Model.GenreGroups)
+                        {
+                            <option value="@genre.Id" selected="@(Model.GenreLargeId == genre.Id)">@genre.Name@(genre.IsActive ? "" : "（旧）")</option>
+                        }
+                    </select>
+                </label>
+                <label>
+                    中ジャンル
+                    <select class="genre" name="genreMiddle" id="genre-middle" disabled="@(selectedLarge is null)">
+                        <option value="">すべて</option>
+                        @if (selectedLarge is not null)
+                        {
+                            @foreach (var genre in selectedLarge.Children)
                             {
-                                <option value="@mg.Name" selected="@(Model.Genre == mg.Name)">　├ @mg.Name</option>
-                                @foreach (var sg in mg.SmallGenres)
-                                {
-                                    <option value="@sg" selected="@(Model.Genre == sg)">　│　└ @sg</option>
-                                }
+                                <option value="@genre.Id" selected="@(Model.GenreMiddleId == genre.Id)">@genre.Name@(genre.IsActive ? "" : "（旧）")</option>
                             }
-                        </optgroup>
-                    }
-                </select>
-            </label>
+                        }
+                    </select>
+                </label>
+                <label>
+                    小ジャンル
+                    <select class="genre" name="genreSmall" id="genre-small" disabled="@(selectedMiddle is null)">
+                        <option value="">すべて</option>
+                        @if (selectedMiddle is not null)
+                        {
+                            @foreach (var genre in selectedMiddle.Children)
+                            {
+                                <option value="@genre.Id" selected="@(Model.GenreSmallId == genre.Id)">@genre.Name@(genre.IsActive ? "" : "（旧）")</option>
+                            }
+                        }
+                    </select>
+                </label>
+            </div>
             <details class="format-filters">
                 <summary>形式フィルタ@(Model.ExcludeMaxi || Model.ExcludeAlbum ? "（設定あり）" : "")</summary>
                 <div class="format-options">
@@ -209,6 +231,7 @@
                 {
                     var pickup = DiscsViewModel.GetPickupArtists(disc);
                     var release = DiscsViewModel.GetRentalCategoryLabel(disc.RentalStartDate);
+                    var genrePath = DiscsViewModel.GetGenrePath(disc);
 
                     <article class="disc">
                         <div class="select-disc">
@@ -243,14 +266,17 @@
                                 @if (disc.IsArchived) { <span class="badge archived">ARCHIVED</span> }
                             </div>
                             <div class="meta">
-                                <a class="filter-link" href="@Model.GetGenreUrl(disc.GenreLarge)">@disc.GenreLarge</a>
-                                @if (!string.IsNullOrWhiteSpace(disc.GenreMiddle))
+                                @if (genrePath.Count == 0)
                                 {
-                                    <text> / <a class="filter-link" href="@Model.GetGenreUrl(disc.GenreMiddle)">@disc.GenreMiddle</a></text>
+                                    <text>ジャンル未解決</text>
                                 }
-                                @if (!string.IsNullOrWhiteSpace(disc.GenreSmall))
+                                else
                                 {
-                                    <text> / <a class="filter-link" href="@Model.GetGenreUrl(disc.GenreSmall)">@disc.GenreSmall</a></text>
+                                    @for (var depth = 0; depth < genrePath.Count; depth++)
+                                    {
+                                        if (depth > 0) { <text> / </text> }
+                                        <a class="filter-link" href="@Model.GetGenreUrl(genrePath, depth)">@genrePath[depth].Name</a>
+                                    }
                                 }
                                 <br />レンタル開始: @(disc.RentalStartDate?.ToString("yyyy-MM-dd") ?? "-") / DISCAS ID: @disc.DiscasId
                             </div>
@@ -287,10 +313,7 @@
                     @if (firstPagerPage > 1)
                     {
                         <a href="@Model.GetPageUrl(1)">1</a>
-                        if (firstPagerPage > 2)
-                        {
-                            <span class="ellipsis" aria-hidden="true">…</span>
-                        }
+                        if (firstPagerPage > 2) { <span class="ellipsis" aria-hidden="true">…</span> }
                     }
                     @for (var pageNumber = firstPagerPage; pageNumber <= lastPagerPage; pageNumber++)
                     {
@@ -305,10 +328,7 @@
                     }
                     @if (lastPagerPage < Model.TotalPages)
                     {
-                        if (lastPagerPage < Model.TotalPages - 1)
-                        {
-                            <span class="ellipsis" aria-hidden="true">…</span>
-                        }
+                        if (lastPagerPage < Model.TotalPages - 1) { <span class="ellipsis" aria-hidden="true">…</span> }
                         <a href="@Model.GetPageUrl(Model.TotalPages)">@Model.TotalPages</a>
                     }
                     @if (Model.PageNumber < Model.TotalPages)
@@ -337,6 +357,33 @@
         };
         checks.forEach(x => x.addEventListener('change', updateBulk));
         if (bulkButton) bulkButton.addEventListener('click', () => form.requestSubmit());
+
+        const genreGroups = @Html.Raw(genreGroupsJson);
+        const genreLarge = document.getElementById('genre-large');
+        const genreMiddle = document.getElementById('genre-middle');
+        const genreSmall = document.getElementById('genre-small');
+
+        // フィルター適用のためにページを再読み込みしなくても階層を選べるよう、
+        // 大・中ジャンルの変更時にサーバーから埋め込んだマスター階層で子候補を再構築する。
+        const replaceGenreOptions = (select, genres) => {
+            if (!select) return;
+            select.replaceChildren(new Option('すべて', ''));
+            for (const genre of genres) {
+                select.add(new Option(`${genre.Name}${genre.IsActive ? '' : '（旧）'}`, String(genre.Id)));
+            }
+            select.disabled = genres.length === 0;
+        };
+
+        genreLarge?.addEventListener('change', () => {
+            const large = genreGroups.find(x => String(x.Id) === genreLarge.value);
+            replaceGenreOptions(genreMiddle, large?.Children ?? []);
+            replaceGenreOptions(genreSmall, []);
+        });
+        genreMiddle?.addEventListener('change', () => {
+            const large = genreGroups.find(x => String(x.Id) === genreLarge?.value);
+            const middle = large?.Children.find(x => String(x.Id) === genreMiddle.value);
+            replaceGenreOptions(genreSmall, middle?.Children ?? []);
+        });
     </script>
 </body>
 </html>

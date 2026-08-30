@@ -11,18 +11,13 @@ var databaseDirectory = Path.GetDirectoryName(Path.GetFullPath(databasePath));
 if (!string.IsNullOrEmpty(databaseDirectory)) Directory.CreateDirectory(databaseDirectory);
 Directory.CreateDirectory(Path.GetFullPath(imageCachePath));
 
-// 画面処理はControllerへ集約し、RazorはViewとしてのみ使用する。
-// Razor Pagesとの併存を残すとルーティングとフォーム記法が二重化するため、MVCだけを登録する。
 builder.Services.AddControllersWithViews();
 builder.Services.AddDbContext<DiscaScoutDbContext>(options => options.UseSqlite($"Data Source={databasePath}"));
-builder.Services.AddSingleton<DiscasRequestThrottle>();
-builder.Services.AddHttpClient<DiscasPageFetcher>();
-// Discordは取得処理とは独立した監視経路として扱い、設定自体は運用画面からSQLiteへ保存する。
-builder.Services.AddHttpClient("discord-webhook");
-builder.Services.AddScoped<DiscordNotificationSettingsStore>();
-builder.Services.AddScoped<DiscordNotificationService>();
+builder.Services.AddSingleton<DiscasRequestThrottle>(); builder.Services.AddHttpClient<DiscasPageFetcher>();
+builder.Services.AddHttpClient("discord-webhook"); builder.Services.AddScoped<DiscordNotificationSettingsStore>(); builder.Services.AddScoped<DiscordNotificationService>();
 builder.Services.AddHttpClient("disc-image-cache");
-builder.Services.AddScoped<DiscasSearchResultParser>(); builder.Services.AddScoped<DiscasDiscDetailParser>();
+builder.Services.AddScoped<DiscasSearchResultParser>(); builder.Services.AddScoped<DiscasDiscDetailParser>(); builder.Services.AddScoped<DiscasGenreMasterParser>();
+builder.Services.AddScoped<GenreResolver>(); builder.Services.AddScoped<GenreMasterService>();
 builder.Services.AddScoped<DiscasCategoryCrawler>(); builder.Services.AddScoped<IDiscasCategoryCrawler>(sp => sp.GetRequiredService<DiscasCategoryCrawler>());
 builder.Services.AddScoped<DiscasArtistCatalogCrawler>(); builder.Services.AddScoped<IDiscasArtistCatalogCrawler>(sp => sp.GetRequiredService<DiscasArtistCatalogCrawler>());
 builder.Services.AddScoped<DiscasSnapshotApplier>(); builder.Services.AddScoped<IDiscasSnapshotStore, DiscasSnapshotStore>();

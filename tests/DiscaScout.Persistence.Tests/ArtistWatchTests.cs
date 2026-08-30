@@ -167,7 +167,6 @@ public sealed class ArtistWatchTests
             NormalizedTitle = DiscTextNormalizer.Normalize(title),
             Artist = artist,
             NormalizedArtist = DiscTextNormalizer.Normalize(artist),
-            GenreLarge = "J-POP",
             FirstSeenAt = now,
             LastSeenAt = now,
             LastUpdatedAt = now

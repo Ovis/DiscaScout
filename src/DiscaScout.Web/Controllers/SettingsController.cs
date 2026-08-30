@@ -1,3 +1,4 @@
+using DiscaScout.Application;
 using DiscaScout.Core;
 using DiscaScout.Persistence;
 using DiscaScout.Web.Models;
@@ -6,7 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace DiscaScout.Web.Controllers;
 
 /// <summary>
-/// Discord通知とスクレイピング件数安全装置の設定画面を提供する
+/// Discord通知、スクレイピング件数安全装置、ジャンルマスターの設定画面を提供する
 /// </summary>
 [Route("settings")]
 public sealed class SettingsController(
@@ -16,7 +17,8 @@ public sealed class SettingsController(
     IScrapeOperationsStore scrapeOperationsStore,
     IScrapeOperationsQueryStore scrapeOperationsQueryStore,
     ManualWorkStore manualWorkStore,
-    ManualWorkSignal manualWorkSignal) : Controller
+    ManualWorkSignal manualWorkSignal,
+    GenreMasterService genreMasterService) : Controller
 {
     private static readonly ScrapeCategory[] GuardCategories = [ScrapeCategory.Upcoming, ScrapeCategory.New];
 
@@ -24,6 +26,30 @@ public sealed class SettingsController(
     [HttpGet("")]
     public async Task<IActionResult> Index(CancellationToken cancellationToken) =>
         View(await LoadAsync(null, null, null, cancellationToken));
+
+    /// <summary>DISCASのすべてのジャンルページからジャンルマスターを手動更新する</summary>
+    [HttpPost("genre-master/refresh")]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> RefreshGenreMaster(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await genreMasterService.RefreshAsync(cancellationToken);
+            TempData[nameof(SettingsViewModel.StatusMessage)] =
+                $"ジャンルマスターを更新しました。追加 {result.Added}件 / 更新 {result.Updated}件 / 無効化 {result.Deactivated}件 / 再有効化 {result.Reactivated}件";
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // 外部HTMLの構造変更や件数急減を安全装置で拒否した場合も、既存マスターは維持したまま理由を画面へ返す。
+            TempData[nameof(SettingsViewModel.StatusMessage)] = $"ジャンルマスターの更新に失敗しました: {ex.Message}";
+        }
+
+        return RedirectToAction(nameof(Index));
+    }
 
     /// <summary>Discord通知設定をSQLiteへ保存する</summary>
     [HttpPost("discord")]
@@ -70,7 +96,6 @@ public sealed class SettingsController(
         }
         catch (Exception ex)
         {
-            // テスト通知ではWebhook設定ミスを利用者へ返す必要があるため、通常通知と異なり失敗を画面へ表示する。
             TempData[nameof(SettingsViewModel.StatusMessage)] = $"Discordへのテスト通知に失敗しました: {ex.Message}";
         }
 
@@ -109,7 +134,6 @@ public sealed class SettingsController(
         }
         else
         {
-            // 既に同カテゴリまたはFullScrapeが待機・実行中なら、その取得がOverrideを利用できるため重複アクセスは追加しない。
             TempData[nameof(SettingsViewModel.StatusMessage)] =
                 $"{SettingsViewModel.GetCategoryLabel(category)}の急減を次回1回だけ許可しました。既存の通常取得があるため追加の確認取得は登録していません";
         }
@@ -140,6 +164,7 @@ public sealed class SettingsController(
     {
         var settings = await discordSettingsStore.GetAsync(cancellationToken);
         var guards = await LoadScrapeGuardsAsync(cancellationToken);
+        var genreMaster = await genreMasterService.GetStatusAsync(cancellationToken);
         return new SettingsViewModel
         {
             DiscordMode = postedMode ?? settings.Mode,
@@ -148,7 +173,8 @@ public sealed class SettingsController(
             ScrapeGuards = guards,
             CountDropConfirmation = confirmationCategory.HasValue
                 ? guards.Single(x => x.Category == confirmationCategory.Value)
-                : null
+                : null,
+            GenreMaster = genreMaster
         };
     }
 

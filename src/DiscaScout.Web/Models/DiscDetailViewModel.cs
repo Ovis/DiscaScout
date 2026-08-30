@@ -28,6 +28,17 @@ public sealed class DiscDetailViewModel
         return "旧作";
     }
 
+    /// <summary>読み込み済みGenreの親参照から表示用のルート順パスを組み立てる</summary>
+    public static string FormatGenrePath(Disc disc)
+    {
+        if (disc.Genre is null) return "未解決";
+        var names = new List<string>();
+        for (var current = disc.Genre; current is not null; current = current.Parent)
+            names.Add(current.Name);
+        names.Reverse();
+        return string.Join(" / ", names);
+    }
+
     public static string FormatDetailStatus(Disc disc)
     {
         if (disc.DetailRefreshCompleted) return "取得完了";

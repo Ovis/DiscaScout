@@ -21,6 +21,15 @@ public sealed class RentalHistoryImportServiceTests
         await dbContext.Database.EnsureCreatedAsync();
 
         var now = DateTime.UtcNow.AddDays(-1);
+        var genre = new Genre
+        {
+            ExternalId = "01",
+            Name = "J-POP",
+            SortOrder = 0,
+            IsActive = true,
+            FirstSeenAt = now,
+            LastSeenAt = now
+        };
         var existing = new Disc
         {
             DiscasId = "1234567890",
@@ -29,7 +38,7 @@ public sealed class RentalHistoryImportServiceTests
             NormalizedTitle = DiscTextNormalizer.Normalize("既存CD"),
             Artist = "既存Artist",
             NormalizedArtist = DiscTextNormalizer.Normalize("既存Artist"),
-            GenreLarge = "J-POP",
+            Genre = genre,
             FirstSeenAt = now,
             LastSeenAt = now,
             LastUpdatedAt = now,
@@ -59,14 +68,14 @@ public sealed class RentalHistoryImportServiceTests
         Assert.False(refreshedExisting.NeedsReview);
         Assert.Empty(refreshedExisting.ReviewReasons);
         Assert.NotNull(refreshedExisting.RentalHistoryImportedAt);
-        // 既存の通常クロール由来メタデータは履歴画面の表示値で上書きしない。
         Assert.Equal("既存CD", refreshedExisting.Title);
+        Assert.Equal(genre.Id, refreshedExisting.GenreId);
 
         var imported = await dbContext.Discs.SingleAsync(x => x.DiscasId == "0000102452");
         Assert.Equal("0000102452", imported.DiscasId);
         Assert.Equal("断絶", imported.Title);
         Assert.Equal("井上陽水", imported.Artist);
-        Assert.Equal("未取得", imported.GenreLarge);
+        Assert.Null(imported.GenreId);
         Assert.True(imported.IsRented);
         Assert.False(imported.NeedsReview);
         Assert.False(imported.IsArchived);

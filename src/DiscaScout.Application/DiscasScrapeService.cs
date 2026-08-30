@@ -11,7 +11,8 @@ public sealed class DiscasScrapeService(
     IDiscasCategoryCrawler crawler,
     IDiscasSnapshotStore snapshotStore,
     IScrapeOperationsStore operationsStore,
-    IScrapeGuardStore guardStore)
+    IScrapeGuardStore guardStore,
+    GenreMasterService? genreMasterService = null)
 {
     private const int MinimumAcceptedPercent = 70;
     private static readonly DiscSourceCategory[] DefaultCategories = [DiscSourceCategory.Upcoming, DiscSourceCategory.New];
@@ -19,17 +20,27 @@ public sealed class DiscasScrapeService(
     /// <summary>通常対象の近日リリース・新作を順番に取得して永続化する</summary>
     public async Task<ScrapeExecutionResult> ExecuteAsync(CancellationToken cancellationToken = default)
     {
+        // 本番DIではGenreMasterServiceが注入される。既存の単体テスト用スタブ構成では省略可能にし、
+        // ジャンル初期化そのものはGenreMasterServiceの専用テストで検証する。
+        if (genreMasterService is not null) await genreMasterService.EnsureInitializedAsync(cancellationToken);
+
         var results = new List<CategoryScrapeResult>(DefaultCategories.Length);
         foreach (var category in DefaultCategories)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            results.Add(await ExecuteCategoryAsync(category, cancellationToken));
+            results.Add(await ExecuteCategoryCoreAsync(category, cancellationToken));
         }
         return new ScrapeExecutionResult(results);
     }
 
     /// <summary>指定した1カテゴリだけを取得し、件数安全性を確認してから永続化する</summary>
     public async Task<CategoryScrapeResult> ExecuteCategoryAsync(DiscSourceCategory category, CancellationToken cancellationToken = default)
+    {
+        if (genreMasterService is not null) await genreMasterService.EnsureInitializedAsync(cancellationToken);
+        return await ExecuteCategoryCoreAsync(category, cancellationToken);
+    }
+
+    private async Task<CategoryScrapeResult> ExecuteCategoryCoreAsync(DiscSourceCategory category, CancellationToken cancellationToken)
     {
         try
         {
@@ -39,8 +50,6 @@ public sealed class DiscasScrapeService(
 
             if (snapshot.TotalCount == 0)
             {
-                // 初回取得でも0件だけは正常値として採用しない。
-                // DISCAS側障害やHTML構造変更を空スナップショットとして反映すると、既存Sourceを誤って消失扱いにするためである。
                 return CategoryScrapeResult.AbnormalCountFailure(
                     category,
                     AbnormalCountReason.ZeroCount,
@@ -76,10 +85,7 @@ public sealed class DiscasScrapeService(
                 overrideUsed = true;
             }
 
-            // 急減許可を利用する場合は、スナップショット反映と許可消費を永続化層の同一トランザクションへ含める。
-            // 片方だけ成功するとRetryでMissingCountを二重加算する可能性があるため、ここでは別々に保存しない。
             var applyResult = await snapshotStore.ApplyAsync(snapshot, overrideUsed, cancellationToken);
-
             return CategoryScrapeResult.Success(
                 category,
                 snapshot.TotalCount,
@@ -132,8 +138,6 @@ public sealed record CategoryScrapeResult
     public int ArtistWatchNewMatchCount { get; init; }
     public bool CountDropOverrideUsed { get; init; }
     public string? ErrorMessage { get; init; }
-
-    /// <summary>失敗後にCoordinatorが登録した次回Retry予定。最終Retry失敗時はnull</summary>
     public DateTime? NextRetryAt { get; init; }
 
     internal static CategoryScrapeResult Success(

@@ -72,6 +72,19 @@
         }
 
         <section class="card">
+            <h2>ジャンルマスター</h2>
+            <div class="facts">
+                <div>Active: <strong>@Model.GenreMaster.ActiveCount 件</strong></div>
+                <div>Inactive: <strong>@Model.GenreMaster.InactiveCount 件</strong></div>
+                <div>最終正常更新: <strong>@SettingsViewModel.FormatJapanTime(Model.GenreMaster.LastUpdatedAt)</strong></div>
+            </div>
+            <p class="muted">DISCASの「すべてのジャンル」から階層を取得します。通常は手動更新のみで、マスターが空の状態で通常クロールを開始する場合だけ事前に自動取得します。取得件数が0件、または既存Active件数の75%未満まで急減した場合は更新を拒否します。</p>
+            <form method="post" asp-controller="Settings" asp-action="RefreshGenreMaster" onsubmit="return confirm('DISCASからジャンルマスターを更新しますか？');">
+                <button type="submit">ジャンルマスターを更新</button>
+            </form>
+        </section>
+
+        <section class="card">
             <h2>スクレイピング件数安全装置</h2>
             <div class="muted" style="margin-bottom:10px">正常にDB反映できた直前の件数を基準にし、0件または前回比70%未満の取得結果はDBへ反映せずRetryします。ページ数は判定には使わず参考情報として記録します。</div>
             @foreach (var guard in Model.ScrapeGuards)

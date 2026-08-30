@@ -40,9 +40,7 @@ public sealed class DiscImageCacheServiceTests
     {
         await using var database = await TestDatabase.CreateAsync();
         var disc = await AddDiscAsync(database.Context, "1001", "https://images.example.test/old.jpg");
-        using var handler = new RecordingHandler(
-            CreateImageResponse("old"),
-            CreateImageResponse("new"));
+        using var handler = new RecordingHandler(CreateImageResponse("old"), CreateImageResponse("new"));
         using var client = new HttpClient(handler);
         using var directory = new TemporaryDirectory();
         var service = new DiscImageCacheService(database.Context, client, directory.Path, TimeSpan.Zero);
@@ -69,9 +67,7 @@ public sealed class DiscImageCacheServiceTests
     {
         await using var database = await TestDatabase.CreateAsync();
         var disc = await AddDiscAsync(database.Context, "1001", "https://images.example.test/old.jpg");
-        using var handler = new RecordingHandler(
-            CreateImageResponse("old"),
-            new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+        using var handler = new RecordingHandler(CreateImageResponse("old"), new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
         using var client = new HttpClient(handler);
         using var directory = new TemporaryDirectory();
         var service = new DiscImageCacheService(database.Context, client, directory.Path, TimeSpan.Zero);
@@ -126,7 +122,6 @@ public sealed class DiscImageCacheServiceTests
             NormalizedTitle = DiscTextNormalizer.Normalize("作品"),
             Artist = "アーティスト",
             NormalizedArtist = DiscTextNormalizer.Normalize("アーティスト"),
-            GenreLarge = "音楽",
             ImageUrl = imageUrl,
             FirstSeenAt = now,
             LastSeenAt = now,
@@ -139,17 +134,12 @@ public sealed class DiscImageCacheServiceTests
 
     private static HttpResponseMessage CreateImageResponse(string content)
     {
-        var response = new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = new StringContent(content)
-        };
+        var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(content) };
         response.Content.Headers.ContentType = new MediaTypeHeaderValue("image/jpeg");
         return response;
     }
 
-    /// <summary>
-    /// 指定順のHTTPレスポンスを返し、実際の画像リクエスト回数を記録する
-    /// </summary>
+    /// <summary>指定順のHTTPレスポンスを返し、実際の画像リクエスト回数を記録する</summary>
     private sealed class RecordingHandler(params HttpResponseMessage[] responses) : HttpMessageHandler
     {
         private readonly Queue<HttpResponseMessage> queue = new(responses);
@@ -158,20 +148,14 @@ public sealed class DiscImageCacheServiceTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             RequestCount++;
-            if (queue.Count == 0)
-            {
-                throw new InvalidOperationException("想定外のHTTP要求が発生した");
-            }
-
+            if (queue.Count == 0) throw new InvalidOperationException("想定外のHTTP要求が発生した");
             var response = queue.Dequeue();
             response.RequestMessage = request;
             return Task.FromResult(response);
         }
     }
 
-    /// <summary>
-    /// SQLiteインメモリDBを接続期間中維持する
-    /// </summary>
+    /// <summary>SQLiteインメモリDBを接続期間中維持する</summary>
     private sealed class TestDatabase : IAsyncDisposable
     {
         private TestDatabase(SqliteConnection connection, DiscaScoutDbContext context)
@@ -187,10 +171,11 @@ public sealed class DiscImageCacheServiceTests
         {
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
-            var options = new DbContextOptionsBuilder<DiscaScoutDbContext>()
-                .UseSqlite(connection)
-                .Options;
+            var options = new DbContextOptionsBuilder<DiscaScoutDbContext>().UseSqlite(connection).Options;
             var context = new DiscaScoutDbContext(options);
+
+            // SQLiteのインメモリDBは接続を開いただけではスキーマが存在しないため、
+            // 各テストで実エンティティを書き込む前に現在モデルからテーブルを作成する。
             await context.Database.EnsureCreatedAsync();
             return new TestDatabase(connection, context);
         }
@@ -202,9 +187,7 @@ public sealed class DiscImageCacheServiceTests
         }
     }
 
-    /// <summary>
-    /// テストごとに一時画像ディレクトリを作成し、終了時に削除する
-    /// </summary>
+    /// <summary>テストごとに一時画像ディレクトリを作成し、終了時に削除する</summary>
     private sealed class TemporaryDirectory : IDisposable
     {
         public TemporaryDirectory()
@@ -217,10 +200,7 @@ public sealed class DiscImageCacheServiceTests
 
         public void Dispose()
         {
-            if (Directory.Exists(Path))
-            {
-                Directory.Delete(Path, recursive: true);
-            }
+            if (Directory.Exists(Path)) Directory.Delete(Path, recursive: true);
         }
     }
 }

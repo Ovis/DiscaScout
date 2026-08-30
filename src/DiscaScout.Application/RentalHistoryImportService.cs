@@ -130,9 +130,9 @@ public sealed class RentalHistoryImportService(DiscaScoutDbContext dbContext, Ti
             NormalizedTitle = DiscTextNormalizer.Normalize(entry.Title),
             Artist = entry.Artist,
             NormalizedArtist = DiscTextNormalizer.Normalize(entry.Artist),
-            // レンタル履歴HTMLにはジャンル情報がない。空値にすると一覧のジャンル候補が分かりにくいため、
-            // 通常クロールで正式なジャンルを取得するまで明示的な仮値を使用する。
-            GenreLarge = "未取得",
+            // レンタル履歴HTMLにはジャンル情報がない。仮の文字列は保存せず、詳細ページ取得後に
+            // ジャンルマスターへ完全一致した場合だけGenreIdを設定する。
+            GenreId = null,
             IsMaxiSingle = entry.Title.StartsWith("【MAXI】", StringComparison.Ordinal),
             FirstSeenAt = now,
             LastSeenAt = now,
