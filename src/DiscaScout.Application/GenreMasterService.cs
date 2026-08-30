@@ -96,7 +96,7 @@ public sealed class GenreMasterService(
         foreach (var item in scraped)
         {
             var genre = byExternalId[item.ExternalId];
-            var parentId = item.ParentExternalId is null ? null : byExternalId[item.ParentExternalId].Id;
+            long? parentId = item.ParentExternalId is null ? null : byExternalId[item.ParentExternalId].Id;
             if (genre.ParentId != parentId)
             {
                 genre.ParentId = parentId;
