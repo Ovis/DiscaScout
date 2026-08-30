@@ -11,6 +11,7 @@ public sealed class DiscsViewModel
     private static readonly TimeZoneInfo JapanTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Asia/Tokyo");
 
     public string Tab { get; init; } = "unchecked";
+    public string UncheckedFilter { get; init; } = "all";
     public string? TitleSearch { get; init; }
     public bool SearchDescription { get; init; }
     public bool SearchTracks { get; init; }
@@ -26,6 +27,7 @@ public sealed class DiscsViewModel
     public IReadOnlyList<GenreGroup> GenreGroups { get; init; } = [];
     public int UncheckedCount { get; init; }
     public int PickupCount { get; init; }
+    public int RentedCount { get; init; }
     public int TotalCount { get; init; }
     public int TotalPages => Math.Max(1, (int)Math.Ceiling(TotalCount / (double)PageSize));
     public string? StatusMessage { get; init; }
@@ -59,13 +61,14 @@ public sealed class DiscsViewModel
         return "旧作";
     }
 
-    public string GetTabUrl(string tab) => BuildListUrl(tab, TitleSearch, SearchDescription, SearchTracks, ArtistSearch, Genre, ExcludeMaxi, ExcludeAlbum, Rental, Sort, PageSize, 1);
-    public string GetArtistUrl(string artist) => BuildListUrl(Tab, TitleSearch, SearchDescription, SearchTracks, artist, Genre, ExcludeMaxi, ExcludeAlbum, Rental, Sort, PageSize, 1);
-    public string GetGenreUrl(string genre) => BuildListUrl(Tab, TitleSearch, SearchDescription, SearchTracks, ArtistSearch, genre, ExcludeMaxi, ExcludeAlbum, Rental, Sort, PageSize, 1);
-    public string GetPageUrl(int page) => BuildListUrl(Tab, TitleSearch, SearchDescription, SearchTracks, ArtistSearch, Genre, ExcludeMaxi, ExcludeAlbum, Rental, Sort, PageSize, page);
+    public string GetTabUrl(string tab) => BuildListUrl(tab, tab == "unchecked" ? UncheckedFilter : "all", TitleSearch, SearchDescription, SearchTracks, ArtistSearch, Genre, ExcludeMaxi, ExcludeAlbum, Rental, Sort, PageSize, 1);
+    public string GetArtistUrl(string artist) => BuildListUrl(Tab, UncheckedFilter, TitleSearch, SearchDescription, SearchTracks, artist, Genre, ExcludeMaxi, ExcludeAlbum, Rental, Sort, PageSize, 1);
+    public string GetGenreUrl(string genre) => BuildListUrl(Tab, UncheckedFilter, TitleSearch, SearchDescription, SearchTracks, ArtistSearch, genre, ExcludeMaxi, ExcludeAlbum, Rental, Sort, PageSize, 1);
+    public string GetPageUrl(int page) => BuildListUrl(Tab, UncheckedFilter, TitleSearch, SearchDescription, SearchTracks, ArtistSearch, Genre, ExcludeMaxi, ExcludeAlbum, Rental, Sort, PageSize, page);
 
     private static string BuildListUrl(
         string tab,
+        string uncheckedFilter,
         string? title,
         bool searchDescription,
         bool searchTracks,
@@ -81,6 +84,7 @@ public sealed class DiscsViewModel
         var parameters = new Dictionary<string, string?>
         {
             ["tab"] = tab,
+            ["uncheckedFilter"] = tab == "unchecked" && uncheckedFilter != "all" ? uncheckedFilter : null,
             ["title"] = title,
             ["searchDescription"] = searchDescription ? "true" : null,
             ["searchTracks"] = searchTracks ? "true" : null,
