@@ -260,7 +260,9 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
         ref long? middleId,
         ref long? smallId)
     {
-        var large = largeId.HasValue ? groups.SingleOrDefault(x => x.Id == largeId.Value) : null;
+        // ref引数をLINQ式へ直接取り込めないため、検索前に値をローカルへ退避する。
+        var selectedLargeId = largeId;
+        var large = selectedLargeId.HasValue ? groups.SingleOrDefault(x => x.Id == selectedLargeId.Value) : null;
         if (large is null)
         {
             largeId = null;
@@ -269,7 +271,8 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
             return;
         }
 
-        var middle = middleId.HasValue ? large.Children.SingleOrDefault(x => x.Id == middleId.Value) : null;
+        var selectedMiddleId = middleId;
+        var middle = selectedMiddleId.HasValue ? large.Children.SingleOrDefault(x => x.Id == selectedMiddleId.Value) : null;
         if (middle is null)
         {
             middleId = null;
@@ -277,7 +280,8 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
             return;
         }
 
-        if (smallId.HasValue && middle.Children.All(x => x.Id != smallId.Value)) smallId = null;
+        var selectedSmallId = smallId;
+        if (selectedSmallId.HasValue && middle.Children.All(x => x.Id != selectedSmallId.Value)) smallId = null;
     }
 
     private static IQueryable<Disc> ApplyTab(IQueryable<Disc> query, string tab, bool hasSearchFilters) => tab switch
@@ -338,30 +342,33 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
         return query;
     }
 
-    private static IQueryable<Disc> ApplyRentalFilter(IQueryable<Disc> query, string rental) => rental switch
+    private static IQueryable<Disc> ApplyRentalFilter(IQueryable<Disc> query, string rental)
     {
-        "rented" => query.Where(x => x.IsRented),
-        "unrented" => query.Where(x => !x.IsRented),
-        _ => query
-    };
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeBySystemTimeZoneId(TimeProvider.System.GetUtcNow(), "Asia/Tokyo").DateTime);
+        return rental switch
+        {
+            "upcoming" => query.Where(x => x.RentalStartDate != null && x.RentalStartDate > today),
+            "new" => query.Where(x => x.RentalStartDate != null && x.RentalStartDate <= today && x.RentalStartDate >= today.AddDays(-90)),
+            "semi-new" => query.Where(x => x.RentalStartDate != null && x.RentalStartDate < today.AddDays(-90) && x.RentalStartDate >= today.AddDays(-180)),
+            "old" => query.Where(x => x.RentalStartDate != null && x.RentalStartDate < today.AddDays(-180)),
+            _ => query
+        };
+    }
 
     private static IQueryable<Disc> ApplySort(IQueryable<Disc> query, string sort) => sort switch
     {
-        "rental" => query.OrderByDescending(x => x.RentalStartDate.HasValue)
-            .ThenByDescending(x => x.RentalStartDate)
-            .ThenBy(x => x.Sources.Where(s => s.IsActive).Select(s => (int?)s.SourceRank).Min() ?? int.MaxValue)
-            .ThenByDescending(x => x.LastUpdatedAt),
+        "rental-asc" => query.OrderBy(x => x.RentalStartDate == null).ThenBy(x => x.RentalStartDate).ThenBy(x => x.Id),
+        "rental-desc" => query.OrderBy(x => x.RentalStartDate == null).ThenByDescending(x => x.RentalStartDate).ThenBy(x => x.Id),
         "title" => query.OrderBy(x => x.NormalizedTitle).ThenBy(x => x.Id),
-        "artist" => query.OrderBy(x => x.NormalizedArtist).ThenBy(x => x.NormalizedTitle),
         _ => query.OrderByDescending(x => x.LastUpdatedAt).ThenByDescending(x => x.Id)
     };
 
-    private static bool HasSearchFilters(string? titleSearch, string? artistSearch, long? genreId, bool excludeMaxi, bool excludeAlbum) =>
-        !string.IsNullOrWhiteSpace(titleSearch) || !string.IsNullOrWhiteSpace(artistSearch) || genreId.HasValue || excludeMaxi || excludeAlbum;
+    private static bool HasSearchFilters(string? title, string? artist, long? genreId, bool excludeMaxi, bool excludeAlbum) =>
+        !string.IsNullOrWhiteSpace(title) || !string.IsNullOrWhiteSpace(artist) || genreId.HasValue || excludeMaxi || excludeAlbum;
 
     private static IEnumerable<string> SplitTerms(string? value) => string.IsNullOrWhiteSpace(value)
         ? []
-        : value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        : value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     private static void NormalizeInputs(
         ref string tab,
@@ -373,16 +380,16 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
         ref int pageSize,
         ref int pageNumber)
     {
-        if (tab is not ("unchecked" or "pickup" or "rented" or "all")) tab = "unchecked";
-        if (uncheckedFilter is not ("all" or "upcoming" or "new" or "artist-watch")) uncheckedFilter = "all";
-        if (rental is not ("all" or "rented" or "unrented")) rental = "all";
-        if (sort is not ("updated" or "rental" or "title" or "artist")) sort = "updated";
-        if (pageSize is not (50 or 100 or 200)) pageSize = 50;
+        tab = new[] { "unchecked", "pickup", "rented", "all" }.Contains(tab) ? tab : "unchecked";
+        uncheckedFilter = new[] { "all", "upcoming", "new", "artist-watch" }.Contains(uncheckedFilter) ? uncheckedFilter : "all";
+        rental = new[] { "all", "upcoming", "new", "semi-new", "old" }.Contains(rental) ? rental : "all";
+        sort = new[] { "updated", "rental-asc", "rental-desc", "title" }.Contains(sort) ? sort : "updated";
+        pageSize = new[] { 20, 50, 100, 200 }.Contains(pageSize) ? pageSize : 50;
         pageNumber = Math.Max(1, pageNumber);
         titleSearch = string.IsNullOrWhiteSpace(titleSearch) ? null : titleSearch.Trim();
         artistSearch = string.IsNullOrWhiteSpace(artistSearch) ? null : artistSearch.Trim();
     }
 
-    private sealed record ReviewUndoState(long DiscId, bool IsRented, bool NeedsReview, DateTime? LastReviewedAt, IReadOnlyList<ReviewReasonUndoState> Reasons);
+    private sealed record ReviewUndoState(long DiscId, bool IsRented, bool NeedsReview, DateTime? LastReviewedAt, ReviewReasonUndoState[] Reasons);
     private sealed record ReviewReasonUndoState(DiscReviewReasonType Reason, DateTime CreatedAt);
 }
