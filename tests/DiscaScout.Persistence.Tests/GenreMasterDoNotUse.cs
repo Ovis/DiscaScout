@@ -1,1 +1,0 @@
-namespace DiscaScout.Persistence.Tests; internal static class GenreMasterDoNotUse {}
