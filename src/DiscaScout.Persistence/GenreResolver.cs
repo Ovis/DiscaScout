@@ -7,9 +7,13 @@ namespace DiscaScout.Persistence;
 public sealed class GenreResolver(DiscaScoutDbContext dbContext)
 {
     /// <summary>大・中・小ジャンルの完全一致パスを解決し、最深ノードを返す</summary>
-    public async Task<Genre?> ResolveAsync(string? large, string? middle, string? small, CancellationToken cancellationToken = default)
+    public Task<Genre?> ResolveAsync(string? large, string? middle, string? small, CancellationToken cancellationToken = default) =>
+        ResolveAsync(new[] { large, middle, small }.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x!.Trim()).ToArray(), cancellationToken);
+
+    /// <summary>任意長のジャンルパスを完全一致で解決する</summary>
+    public async Task<Genre?> ResolveAsync(IReadOnlyList<string> path, CancellationToken cancellationToken = default)
     {
-        var names = new[] { large, middle, small }.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x!.Trim()).ToArray();
+        var names = path.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).ToArray();
         if (names.Length == 0) return null;
         var genres = await dbContext.Genres.AsNoTracking().Where(x => x.IsActive).ToListAsync(cancellationToken);
         Genre? current = null;
@@ -22,8 +26,4 @@ public sealed class GenreResolver(DiscaScoutDbContext dbContext)
         }
         return current;
     }
-
-    /// <summary>任意長のジャンルパスを完全一致で解決する</summary>
-    public Task<Genre?> ResolveAsync(IReadOnlyList<string> path, CancellationToken cancellationToken = default) =>
-        ResolveAsync(path.ElementAtOrDefault(0), path.ElementAtOrDefault(1), path.ElementAtOrDefault(2), cancellationToken);
 }
