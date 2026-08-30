@@ -23,6 +23,7 @@ public sealed class DiscsViewModel
     public bool ExcludeAlbum { get; init; }
     public string Rental { get; init; } = "all";
     public string Sort { get; init; } = "updated";
+    public string Order { get; init; } = "desc";
     public int PageSize { get; init; } = 50;
     public int PageNumber { get; init; } = 1;
     public IReadOnlyList<Disc> Items { get; init; } = [];
@@ -74,9 +75,9 @@ public sealed class DiscsViewModel
         return result;
     }
 
-    public string GetTabUrl(string tab) => BuildListUrl(tab, tab == "unchecked" ? UncheckedFilter : "all", TitleSearch, SearchDescription, SearchTracks, ArtistSearch, GenreLargeId, GenreMiddleId, GenreSmallId, ExcludeMaxi, ExcludeAlbum, Rental, Sort, PageSize, 1);
-    public string GetArtistUrl(string artist) => BuildListUrl(Tab, UncheckedFilter, TitleSearch, SearchDescription, SearchTracks, artist, GenreLargeId, GenreMiddleId, GenreSmallId, ExcludeMaxi, ExcludeAlbum, Rental, Sort, PageSize, 1);
-    public string GetPageUrl(int page) => BuildListUrl(Tab, UncheckedFilter, TitleSearch, SearchDescription, SearchTracks, ArtistSearch, GenreLargeId, GenreMiddleId, GenreSmallId, ExcludeMaxi, ExcludeAlbum, Rental, Sort, PageSize, page);
+    public string GetTabUrl(string tab) => BuildListUrl(tab, tab == "unchecked" ? UncheckedFilter : "all", TitleSearch, SearchDescription, SearchTracks, ArtistSearch, GenreLargeId, GenreMiddleId, GenreSmallId, ExcludeMaxi, ExcludeAlbum, Rental, Sort, Order, PageSize, 1);
+    public string GetArtistUrl(string artist) => BuildListUrl(Tab, UncheckedFilter, TitleSearch, SearchDescription, SearchTracks, artist, GenreLargeId, GenreMiddleId, GenreSmallId, ExcludeMaxi, ExcludeAlbum, Rental, Sort, Order, PageSize, 1);
+    public string GetPageUrl(int page) => BuildListUrl(Tab, UncheckedFilter, TitleSearch, SearchDescription, SearchTracks, ArtistSearch, GenreLargeId, GenreMiddleId, GenreSmallId, ExcludeMaxi, ExcludeAlbum, Rental, Sort, Order, PageSize, page);
 
     /// <summary>カード上のジャンルノードを階層選択として反映するURLを生成する</summary>
     public string GetGenreUrl(IReadOnlyList<Genre> path, int selectedDepth)
@@ -84,7 +85,7 @@ public sealed class DiscsViewModel
         var large = selectedDepth >= 0 ? path.ElementAtOrDefault(0)?.Id : null;
         var middle = selectedDepth >= 1 ? path.ElementAtOrDefault(1)?.Id : null;
         var small = selectedDepth >= 2 ? path.ElementAtOrDefault(2)?.Id : null;
-        return BuildListUrl(Tab, UncheckedFilter, TitleSearch, SearchDescription, SearchTracks, ArtistSearch, large, middle, small, ExcludeMaxi, ExcludeAlbum, Rental, Sort, PageSize, 1);
+        return BuildListUrl(Tab, UncheckedFilter, TitleSearch, SearchDescription, SearchTracks, ArtistSearch, large, middle, small, ExcludeMaxi, ExcludeAlbum, Rental, Sort, Order, PageSize, 1);
     }
 
     private static string BuildListUrl(
@@ -101,6 +102,7 @@ public sealed class DiscsViewModel
         bool excludeAlbum,
         string rental,
         string sort,
+        string order,
         int size,
         int page)
     {
@@ -119,6 +121,7 @@ public sealed class DiscsViewModel
             ["excludeAlbum"] = excludeAlbum ? "true" : null,
             ["rental"] = rental == "all" ? null : rental,
             ["sort"] = sort == "updated" ? null : sort,
+            ["order"] = order == "desc" ? null : order,
             ["size"] = size == 50 ? null : size.ToString(),
             ["p"] = page <= 1 ? null : page.ToString()
         };
