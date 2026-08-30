@@ -1,0 +1,23 @@
+services:
+  disca-scout:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: disca-scout
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      TZ: Asia/Tokyo
+      DiscaScout__DatabasePath: /app/data/discascout.db
+      DiscaScout__ImageCachePath: /app/data/images
+    ports:
+      - "8080:8080"
+    volumes:
+      # SQLite、取得画像など運用中に生成されるデータをDocker Volumeではなくホスト側で直接管理する
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
