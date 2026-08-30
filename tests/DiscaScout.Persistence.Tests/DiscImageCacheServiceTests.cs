@@ -163,15 +163,23 @@ public sealed class DiscImageCacheServiceTests
             Connection = connection;
             Context = context;
         }
+
         public SqliteConnection Connection { get; }
         public DiscaScoutDbContext Context { get; }
+
         public static async Task<TestDatabase> CreateAsync()
         {
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
             var options = new DbContextOptionsBuilder<DiscaScoutDbContext>().UseSqlite(connection).Options;
-            return new TestDatabase(connection, new DiscaScoutDbContext(options));
+            var context = new DiscaScoutDbContext(options);
+
+            // SQLiteのインメモリDBは接続を開いただけではスキーマが存在しないため、
+            // 各テストで実エンティティを書き込む前に現在モデルからテーブルを作成する。
+            await context.Database.EnsureCreatedAsync();
+            return new TestDatabase(connection, context);
         }
+
         public async ValueTask DisposeAsync()
         {
             await Context.DisposeAsync();
@@ -187,7 +195,9 @@ public sealed class DiscImageCacheServiceTests
             Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"discascout-{Guid.NewGuid():N}");
             Directory.CreateDirectory(Path);
         }
+
         public string Path { get; }
+
         public void Dispose()
         {
             if (Directory.Exists(Path)) Directory.Delete(Path, recursive: true);
