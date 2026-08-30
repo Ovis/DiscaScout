@@ -1,6 +1,6 @@
 const STATE_KEY = "rentalHistoryExporterState";
 const RESULT_KEY = "rentalHistoryExporterLastSuccessfulResult";
-const HISTORY_URL = "https://www.discas.net/netdvd/dvd/rentalLog.do";
+const HISTORY_URL = "https://www.discas.net/netdvd/wish/rentalLog.do";
 const ALARM_NAME = "discas-rental-history-next-page";
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -74,7 +74,8 @@ async function fetchAndParse(page) {
     const url = `${HISTORY_URL}?pageNo=${page}&pT=0`;
     const response = await fetch(url, { credentials: "include", cache: "no-store", redirect: "follow" });
     if (!response.ok) throw new Error(`ページ${page}の取得に失敗しました (HTTP ${response.status})`);
-    if (!response.url.includes("rentalLog.do")) throw new Error("レンタル履歴以外へリダイレクトされました。DISCASへ再ログインしてください。");
+    // ログイン切れ等で別ページが返った場合、空の履歴として処理すると完全性判定を誤るためURLも検証する。
+    if (!response.url.includes("/netdvd/wish/rentalLog.do")) throw new Error("レンタル履歴以外へリダイレクトされました。DISCASへ再ログインしてください。");
     const html = await response.text();
     const result = await chrome.runtime.sendMessage({ type: "parse-html", html });
     if (!result?.ok) throw new Error(result?.error ?? "HTMLを解析できませんでした。");
