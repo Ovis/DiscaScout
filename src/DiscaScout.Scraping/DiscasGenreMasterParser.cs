@@ -1,14 +1,17 @@
-using AngleSharp.Dom;
 using AngleSharp.Html.Parser;
 
 namespace DiscaScout.Scraping;
 
-/// <summary>DISCASの「すべてのジャンル」ページからジャンル階層と外部IDを抽出する</summary>
+/// <summary>
+/// DISCASの「すべてのジャンル」ページからジャンル階層と外部IDを抽出する
+/// </summary>
 public sealed class DiscasGenreMasterParser
 {
     private readonly HtmlParser parser = new();
 
-    /// <summary>ジャンルマスターページを解析する</summary>
+    /// <summary>
+    /// ジャンルマスターページを解析する
+    /// </summary>
     /// <param name="html">DISCASから取得してデコード済みの「すべてのジャンル」HTML</param>
     /// <returns>外部ID、表示名、親外部ID、兄弟内表示順を持つジャンル一覧</returns>
     public IReadOnlyList<ScrapedGenre> Parse(string html)
@@ -19,15 +22,16 @@ public sealed class DiscasGenreMasterParser
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var nextSortOrder = new Dictionary<string, int>(StringComparer.Ordinal);
 
-        foreach (var anchor in document.QuerySelectorAll("a[href]"))
+        // 実際のgenreAll.doはul/liのネストで階層を表していない。
+        // 大ジャンルはppdis00033WrapB内のh2、配下ジャンルは同じブロック内の一覧として並び、
+        // Gパラメータ自体が「01013,01072」のように親から子までの経路を保持している。
+        foreach (var anchor in document.QuerySelectorAll(".ppdis00033WrapB a[href]"))
         {
-            var externalId = GetGenreId(anchor.GetAttribute("href"));
+            var externalId = GetGenrePathId(anchor.GetAttribute("href"));
             var name = Normalize(anchor.TextContent);
-            if (externalId is null || name is null || name == "すべてのジャンル" || !seen.Add(externalId)) continue;
+            if (externalId is null || name is null || !seen.Add(externalId)) continue;
 
-            var parentExternalId = FindParentGenreId(anchor);
-            // SortOrderは兄弟間だけで意味を持つ。ページ全体の通番を保存すると親が異なるだけで
-            // 表示順が不自然になるため、親外部IDごとに0始まりで採番する。
+            var parentExternalId = GetParentPathId(externalId);
             var parentKey = parentExternalId ?? string.Empty;
             nextSortOrder.TryGetValue(parentKey, out var sortOrder);
             nextSortOrder[parentKey] = sortOrder + 1;
@@ -37,18 +41,7 @@ public sealed class DiscasGenreMasterParser
         return result;
     }
 
-    private static string? FindParentGenreId(IElement anchor)
-    {
-        var parentLi = anchor.Closest("li")?.ParentElement?.Closest("li");
-        if (parentLi is null) return null;
-        foreach (var child in parentLi.Children)
-        {
-            if (child.LocalName == "a" && GetGenreId(child.GetAttribute("href")) is { } id) return id;
-        }
-        return null;
-    }
-
-    private static string? GetGenreId(string? href)
+    private static string? GetGenrePathId(string? href)
     {
         if (string.IsNullOrWhiteSpace(href)) return null;
         var queryIndex = href.IndexOf('?');
@@ -60,11 +53,22 @@ public sealed class DiscasGenreMasterParser
             if (separator <= 0) continue;
             var key = Uri.UnescapeDataString(part[..separator]);
             if (!key.Equals("G", StringComparison.OrdinalIgnoreCase)) continue;
+
             var value = Uri.UnescapeDataString(part[(separator + 1)..].Replace('+', ' ')).Trim();
-            return value.Length == 0 || value.Contains(',') ? null : value;
+            if (value.Length == 0) return null;
+
+            var segments = value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (segments.Length == 0 || segments.Any(x => x.Length == 0)) return null;
+            return string.Join(',', segments);
         }
 
         return null;
+    }
+
+    private static string? GetParentPathId(string externalId)
+    {
+        var separator = externalId.LastIndexOf(',');
+        return separator < 0 ? null : externalId[..separator];
     }
 
     private static string? Normalize(string value)
@@ -74,9 +78,11 @@ public sealed class DiscasGenreMasterParser
     }
 }
 
-/// <summary>DISCASジャンルマスターページから取得した1ノードを保持する</summary>
-/// <param name="ExternalId">DISCASのジャンルリンクに含まれるGパラメータ</param>
+/// <summary>
+/// DISCASジャンルマスターページから取得した1ノードを保持する
+/// </summary>
+/// <param name="ExternalId">DISCASのGパラメータが表すルートから当該ノードまでのジャンル経路</param>
 /// <param name="Name">表示名</param>
-/// <param name="ParentExternalId">親ジャンルのGパラメータ。ルートの場合はnull</param>
+/// <param name="ParentExternalId">親ノードまでのGパラメータ経路。ルートの場合はnull</param>
 /// <param name="SortOrder">同一親配下での表示順</param>
 public sealed record ScrapedGenre(string ExternalId, string Name, string? ParentExternalId, int SortOrder);
