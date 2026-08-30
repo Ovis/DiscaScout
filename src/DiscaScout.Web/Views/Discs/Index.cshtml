@@ -4,6 +4,8 @@
     var returnUrl = Context.Request.Path + Context.Request.QueryString;
     var reviewablePageItems = Model.Items.Where(x => x.NeedsReview && !x.IsRented).ToArray();
     var rentablePageItems = Model.Items.Where(x => !x.IsRented).ToArray();
+    var firstPagerPage = Math.Max(1, Model.PageNumber - 2);
+    var lastPagerPage = Math.Min(Model.TotalPages, Model.PageNumber + 2);
 }
 <!doctype html>
 <html lang="ja">
@@ -65,8 +67,14 @@
         .actions { display: flex; flex-direction: column; gap: 6px; align-items: stretch; min-width: 112px; }
         .actions button, .actions a { width: 100%; box-sizing: border-box; text-align: center; }
         .actions a { display: block; padding: 8px 10px; border-radius: 6px; border: 1px solid #c9ced6; color: #273142; text-decoration: none; font-size: 12px; }
-        .pager { display: flex; justify-content: space-between; margin-top: 16px; color: #68707c; font-size: 13px; }
-        .pager a { color: #165dce; text-decoration: none; }
+        .pager { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-top: 16px; color: #68707c; font-size: 13px; }
+        .pager-pages { display: flex; align-items: center; justify-content: flex-end; gap: 4px; flex-wrap: wrap; }
+        .pager-pages a, .pager-pages .current { min-width: 32px; box-sizing: border-box; padding: 7px 9px; border: 1px solid #c9ced6; border-radius: 6px; text-align: center; text-decoration: none; }
+        .pager-pages a { color: #165dce; background: white; }
+        .pager-pages a:hover { background: #eef4ff; }
+        .pager-pages .current { border-color: #273142; background: #273142; color: white; font-weight: 700; }
+        .pager-pages .previous, .pager-pages .next { min-width: auto; }
+        .pager-pages .ellipsis { padding: 0 3px; color: #858d98; }
     </style>
 </head>
 <body>
@@ -269,16 +277,46 @@
 
         <div class="pager">
             <span>@Model.TotalCount 件 / @Model.PageNumber / @Model.TotalPages ページ</span>
-            <span>
-                @if (Model.PageNumber > 1)
-                {
-                    <a href="@Model.GetPageUrl(Model.PageNumber - 1)">← 前</a>
-                }
-                @if (Model.PageNumber < Model.TotalPages)
-                {
-                    <text>&nbsp;&nbsp;</text><a href="@Model.GetPageUrl(Model.PageNumber + 1)">次 →</a>
-                }
-            </span>
+            @if (Model.TotalPages > 1)
+            {
+                <span class="pager-pages" aria-label="ページ選択">
+                    @if (Model.PageNumber > 1)
+                    {
+                        <a class="previous" href="@Model.GetPageUrl(Model.PageNumber - 1)">‹ 前</a>
+                    }
+                    @if (firstPagerPage > 1)
+                    {
+                        <a href="@Model.GetPageUrl(1)">1</a>
+                        if (firstPagerPage > 2)
+                        {
+                            <span class="ellipsis" aria-hidden="true">…</span>
+                        }
+                    }
+                    @for (var pageNumber = firstPagerPage; pageNumber <= lastPagerPage; pageNumber++)
+                    {
+                        if (pageNumber == Model.PageNumber)
+                        {
+                            <span class="current" aria-current="page">@(pageNumber)</span>
+                        }
+                        else
+                        {
+                            <a href="@Model.GetPageUrl(pageNumber)">@(pageNumber)</a>
+                        }
+                    }
+                    @if (lastPagerPage < Model.TotalPages)
+                    {
+                        if (lastPagerPage < Model.TotalPages - 1)
+                        {
+                            <span class="ellipsis" aria-hidden="true">…</span>
+                        }
+                        <a href="@Model.GetPageUrl(Model.TotalPages)">@Model.TotalPages</a>
+                    }
+                    @if (Model.PageNumber < Model.TotalPages)
+                    {
+                        <a class="next" href="@Model.GetPageUrl(Model.PageNumber + 1)">次 ›</a>
+                    }
+                </span>
+            }
         </div>
     </main>
     <script>
