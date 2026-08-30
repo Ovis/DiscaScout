@@ -51,8 +51,9 @@ async function processNextPage() {
     try {
         const parsed = await fetchAndParse(page);
         if (page === 1) {
-            if (parsed.totalCount === null || parsed.totalPages === null) throw new Error("履歴の総件数または総ページ数を取得できませんでした。ログイン状態とページ構造を確認してください。");
-            state.expectedTotalRows = parsed.totalCount;
+            if (parsed.historyTotalCount === null || parsed.totalPages === null) throw new Error("履歴の総件数または総ページ数を取得できませんでした。ログイン状態とページ構造を確認してください。");
+            // DISCASの「全N件」は返却済み履歴だけを表す。現在レンタル中の行も出力対象なので1ページ目で別途加算する。
+            state.expectedTotalRows = parsed.historyTotalCount + parsed.currentRows.length;
             state.totalPages = parsed.totalPages;
         }
         applyPage(state, page, parsed);
@@ -76,17 +77,21 @@ async function fetchAndParse(page) {
     const url = `${HISTORY_URL}?pageNo=${page}&pT=0`;
     const response = await fetch(url, { credentials: "include", cache: "no-store", redirect: "follow" });
     if (!response.ok) throw new Error(`ページ${page}の取得に失敗しました (HTTP ${response.status})`);
-    const html = await response.text();
+
+    // Response.text()はHTML内のcharset宣言を参照せずUTF-8としてデコードするため、
+    // Windows-31JのDISCASページでは日本語が文字化けする。生バイト列をShift-JISとして明示的にデコードする。
+    const html = new TextDecoder("shift_jis").decode(await response.arrayBuffer());
 
     // HTML解析に失敗した場合でも実際にDISCASから返された内容を確認できるよう、直近のレスポンスを保存する。
-    // 認証済みページの内容を含むため、通常結果とは分離し、デバッグ操作を行った場合だけユーザーが明示的に出力できるようにする。
+    // 保存時はUTF-8のBlobとして出力するため、HTML自身の文字コード宣言もUTF-8へ合わせて再文字化けを防ぐ。
+    const debugHtml = normalizeDebugHtmlEncoding(html);
     await chrome.storage.local.set({
         [DEBUG_HTML_KEY]: {
             fetchedAt: new Date().toISOString(),
             requestedUrl: url,
             responseUrl: response.url,
             page,
-            html
+            html: debugHtml
         }
     });
 
@@ -98,12 +103,22 @@ async function fetchAndParse(page) {
 }
 
 function applyPage(state, page, parsed) {
-    state.parsedRows += parsed.rows.length;
-    const cdRows = parsed.rows.filter(x => x.isCd);
+    // 現在レンタル中一覧は各ページのHTMLに含まれるため、1ページ目だけ取り込む。
+    // 返却済み履歴はページごとの20件をすべて取り込む。
+    const rows = page === 1 ? [...parsed.currentRows, ...parsed.historyRows] : parsed.historyRows;
+    state.parsedRows += rows.length;
+    const cdRows = rows.filter(x => x.isCd);
     state.cdRows += cdRows.length;
-    state.pageStats.push({ page, rowCount: parsed.rows.length, cdCount: cdRows.length, parseErrorCount: parsed.rows.filter(x => x.errors.length).length });
+    state.pageStats.push({
+        page,
+        rowCount: rows.length,
+        historyRowCount: parsed.historyRows.length,
+        currentRowCount: page === 1 ? parsed.currentRows.length : 0,
+        cdCount: cdRows.length,
+        parseErrorCount: rows.filter(x => x.errors.length).length
+    });
 
-    for (const [index, row] of parsed.rows.entries()) {
+    for (const [index, row] of rows.entries()) {
         if (row.errors.length) state.parseErrors.push({ page, row: index + 1, titleId: row.titleId, errors: row.errors });
         if (!row.isCd || !row.titleId || !row.title || !row.artist) continue;
         const existing = state.records.find(x => x.titleId === row.titleId);
@@ -176,6 +191,12 @@ async function ensureOffscreenDocument() {
 async function resumeInterruptedJob() {
     const state = await getState();
     if (state && ["running", "retrying"].includes(state.status)) await scheduleNext(1000);
+}
+
+function normalizeDebugHtmlEncoding(html) {
+    return html
+        .replace(/encoding=["']Windows-31J["']/i, 'encoding="UTF-8"')
+        .replace(/charset\s*=\s*Windows-31J/ig, "charset=UTF-8");
 }
 
 async function getState() { return (await chrome.storage.local.get(STATE_KEY))[STATE_KEY] ?? null; }
