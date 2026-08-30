@@ -3,13 +3,205 @@
     ViewData["Title"] = "DiscaScout Artist設定";
 }
 <!doctype html>
-<html lang="ja"><head><meta charset="utf-8" /><title>@ViewData["Title"]</title><style>
-:root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#20242a}body{margin:0;background:#f6f7f9}main{max-width:1180px;margin:0 auto;padding:24px 28px}nav{display:flex;gap:14px;margin-bottom:18px;font-size:14px}nav a{color:#165dce;text-decoration:none}h1{margin:0 0 6px;font-size:28px}h2{margin:0 0 12px;font-size:19px}.muted{color:#68707c;font-size:13px}.card{background:white;border:1px solid #dfe3e8;border-radius:9px;padding:16px;margin-top:16px}.status{margin-top:14px;padding:10px 12px;background:#eef4ff;border:1px solid #cbdcff;border-radius:7px}.preview{border-color:#9db9e8;background:#f8fbff}.preview-grid{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:10px;margin:12px 0}.preview-stat{background:white;border:1px solid #dce5f2;border-radius:7px;padding:10px}.preview-stat strong{display:block;font-size:22px;margin-top:3px}.form-row{display:grid;grid-template-columns:minmax(200px,1fr) 140px auto auto auto auto;gap:10px;align-items:end}label{display:flex;flex-direction:column;gap:5px;font-size:12px;font-weight:650}label.check{flex-direction:row;align-items:center;padding-bottom:8px;white-space:nowrap}input[type=text],select{padding:8px;border:1px solid #c9ced6;border-radius:6px;background:white}button{border:0;border-radius:6px;padding:8px 12px;background:#273142;color:white;font-weight:650;cursor:pointer}button.primary{background:#165dce}button.secondary{background:#5f6b7a}button.archive{background:#8b3b3b}button:disabled{cursor:default;opacity:.55}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:10px 8px;border-bottom:1px solid #e6e9ed;text-align:left;vertical-align:middle}th{color:#5a6470;white-space:nowrap}td form{margin:0}.setting-form{display:grid;grid-template-columns:minmax(180px,1fr) 120px auto auto auto auto;gap:8px;align-items:center}.setting-form input[type=text],.setting-form select{min-width:0;width:100%;box-sizing:border-box}.count{white-space:nowrap;color:#68707c}.archived{opacity:.62}.actions,.confirm-actions{display:flex;gap:6px;margin-top:6px;align-items:center}.work,.badge{display:inline-block;padding:2px 6px;border-radius:999px;font-size:11px;font-weight:700}.work{margin-left:6px;background:#eef4ff;color:#165dce}.badge.watch{background:#e8dcff}.badge.catalog{background:#dff3e4}.badge.match{background:#e9edf2}.badge.review{background:#fff0c9}
-</style></head><body><main>
-<partial name="_Navigation" />
-<h1>Artist設定</h1><div class="muted">設定は保存前にローカルCDとの一致件数を確認します。全作品収集は保存後にバックグラウンドで実行します。</div>
-@if(!string.IsNullOrWhiteSpace(Model.StatusMessage)){<div class="status">@Model.StatusMessage</div>}
-@if(Model.Preview is { } preview){<section class="card preview"><h2>保存前の確認</h2><div><strong>@preview.Artist</strong> / @(preview.MatchType==ArtistMatchType.Exact?"完全一致":"部分一致")</div><div>@if(preview.IsWatchEnabled){<span class="badge watch">新着Watch</span>}@if(preview.CollectFullCatalog){<span class="badge catalog">全作品収集</span>}@if(preview.CollectFullCatalog&&preview.ReviewInitialCatalogItems){<span class="badge review">初回取得を未チェックへ</span>}</div><div class="preview-grid"><div class="preview-stat"><span class="muted">一致する既存CD</span><strong>@preview.MatchCount</strong></div><div class="preview-stat"><span class="muted">うち確認済み</span><strong>@preview.ReviewedMatchCount</strong></div><div class="preview-stat"><span class="muted">新たに一致状態になるCD</span><strong>@preview.NewlyMatchedCount</strong></div><div class="preview-stat"><span class="muted">未チェックへ戻せるCD</span><strong>@preview.ReopenCandidateCount</strong></div></div><div class="muted">初回取得を未チェックにする設定は、全作品収集で初めて新規発見されたCDだけに適用します。既にローカルにあるCDは下の再確認設定で選択します。</div><form method="post" asp-controller="Artists" asp-action="@(preview.Id.HasValue?"Update":"Add")" class="confirm-actions">@if(preview.Id.HasValue){<input type="hidden" name="id" value="@preview.Id"/>}<input type="hidden" name="artist" value="@preview.Artist"/><input type="hidden" name="matchType" value="@preview.MatchType"/><input type="hidden" name="isWatchEnabled" value="@preview.IsWatchEnabled.ToString().ToLowerInvariant()"/><input type="hidden" name="collectFullCatalog" value="@preview.CollectFullCatalog.ToString().ToLowerInvariant()"/><input type="hidden" name="reviewInitialCatalogItems" value="@preview.ReviewInitialCatalogItems.ToString().ToLowerInvariant()"/>@if(preview.ReopenCandidateCount>0){<label class="check"><input type="checkbox" name="reopenExistingReviewedMatches" value="true"/> @preview.ReopenCandidateCount 件を未チェックへ戻す</label>}<button class="primary" type="submit">この内容で保存</button><a href="/artists">キャンセル</a></form></section>}
-<section class="card"><h2>追加</h2><form method="post" asp-controller="Artists" asp-action="Preview" class="form-row"><label>アーティスト名<input type="text" name="artist" required/></label><label>一致方法<select name="matchType"><option value="Exact">完全一致</option><option value="Contains">部分一致</option></select></label><label class="check"><input type="checkbox" name="isWatchEnabled" value="true" checked/> 新着Watch</label><label class="check"><input type="checkbox" name="collectFullCatalog" value="true"/> 全作品収集</label><label class="check"><input type="checkbox" name="reviewInitialCatalogItems" value="true"/> 初回取得を未チェックへ</label><button class="primary" type="submit">一致を確認</button></form></section>
-<section class="card"><h2>設定一覧</h2>@if(Model.Settings.Count==0){<div class="muted">Artist設定はまだありません。</div>}else{<table><thead><tr><th>設定</th><th>現在一致</th><th>Catalog</th><th>操作</th></tr></thead><tbody>@foreach(var setting in Model.Settings){var catalogWorkActive=Model.ActiveCatalogSettingIds.Contains(setting.Id);<tr class="@(setting.IsArchived?"archived":"")"><td>@if(!setting.IsArchived){<form method="post" asp-controller="Artists" asp-action="Preview" class="setting-form"><input type="hidden" name="id" value="@setting.Id"/><input type="text" name="artist" value="@setting.Artist" required disabled="@catalogWorkActive"/><select name="matchType" disabled="@catalogWorkActive">@if(setting.MatchType==ArtistMatchType.Exact){<option value="Exact" selected>完全一致</option><option value="Contains">部分一致</option>}else{<option value="Exact">完全一致</option><option value="Contains" selected>部分一致</option>}</select><label class="check"><input type="checkbox" name="isWatchEnabled" value="true" checked="@setting.IsWatchEnabled" disabled="@catalogWorkActive"/> Watch</label><label class="check"><input type="checkbox" name="collectFullCatalog" value="true" checked="@setting.CollectFullCatalog" disabled="@catalogWorkActive"/> 全作品</label>@if(!setting.InitialCatalogCollectionCompleted){<label class="check"><input type="checkbox" name="reviewInitialCatalogItems" value="true" checked="@setting.ReviewInitialCatalogItems" disabled="@catalogWorkActive"/> 初回を未チェック</label>}else{<span class="muted">初回取得済み</span>}<button type="submit" disabled="@catalogWorkActive">@(catalogWorkActive?"処理中":"変更を確認")</button></form><div><span class="badge match">@(setting.MatchType==ArtistMatchType.Exact?"完全一致":"部分一致")</span>@if(setting.IsWatchEnabled){<span class="badge watch">Watch</span>}@if(setting.CollectFullCatalog){<span class="badge catalog">全作品収集</span>}@if(setting.ReviewInitialCatalogItems){<span class="badge review">初回レビュー</span>}@if(catalogWorkActive){<span class="work">全作品収集 待機中 / 実行中</span>}</div>}else{<strong>@setting.Artist</strong> <span class="muted">(@(setting.MatchType==ArtistMatchType.Exact?"完全一致":"部分一致") / アーカイブ済み)</span>}</td><td class="count">@setting.CurrentMatchCount 件</td><td class="count">@setting.ActiveCatalogCount 件</td><td><div class="actions">@if(!setting.IsArchived&&setting.CollectFullCatalog){<form method="post" asp-controller="Artists" asp-action="Collect"><input type="hidden" name="id" value="@setting.Id"/><button class="secondary" type="submit" disabled="@catalogWorkActive">全作品を再取得</button></form>}@if(!setting.IsArchived){<form method="post" asp-controller="Artists" asp-action="Archive"><input type="hidden" name="id" value="@setting.Id"/><button class="archive" type="submit" disabled="@catalogWorkActive">アーカイブ</button></form>}else{<form method="post" asp-controller="Artists" asp-action="Restore"><input type="hidden" name="id" value="@setting.Id"/><button type="submit">復元</button></form>}</div></td></tr>}</tbody></table>}</section>
-</main></body></html>
+<html lang="ja">
+<head>
+    <meta charset="utf-8" />
+    <title>@ViewData["Title"]</title>
+    <style>
+        :root { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #20242a; }
+        body { margin: 0; background: #f6f7f9; }
+        main { max-width: 1180px; margin: 0 auto; padding: 24px 28px; }
+        nav { display: flex; gap: 14px; margin-bottom: 18px; font-size: 14px; }
+        nav a { color: #165dce; text-decoration: none; }
+        h1 { margin: 0 0 6px; font-size: 28px; }
+        h2 { margin: 0 0 12px; font-size: 19px; }
+        .muted { color: #68707c; font-size: 13px; }
+        .card { background: white; border: 1px solid #dfe3e8; border-radius: 9px; padding: 16px; margin-top: 16px; }
+        .status { margin-top: 14px; padding: 10px 12px; background: #eef4ff; border: 1px solid #cbdcff; border-radius: 7px; }
+        .preview { border-color: #9db9e8; background: #f8fbff; }
+        .preview-grid { display: grid; grid-template-columns: repeat(4, minmax(130px, 1fr)); gap: 10px; margin: 12px 0; }
+        .preview-stat { background: white; border: 1px solid #dce5f2; border-radius: 7px; padding: 10px; }
+        .preview-stat strong { display: block; font-size: 22px; margin-top: 3px; }
+        .form-row { display: grid; grid-template-columns: minmax(200px, 1fr) 140px auto auto auto auto; gap: 10px; align-items: end; }
+        label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; font-weight: 650; }
+        label.check { flex-direction: row; align-items: center; padding-bottom: 8px; white-space: nowrap; }
+        input[type=text], select { padding: 8px; border: 1px solid #c9ced6; border-radius: 6px; background: white; }
+        button { border: 0; border-radius: 6px; padding: 8px 12px; background: #273142; color: white; font-weight: 650; cursor: pointer; }
+        button.primary { background: #165dce; }
+        button.secondary { background: #5f6b7a; }
+        button.archive { background: #8b3b3b; }
+        button:disabled { cursor: default; opacity: .55; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th, td { padding: 10px 8px; border-bottom: 1px solid #e6e9ed; text-align: left; vertical-align: middle; }
+        th { color: #5a6470; white-space: nowrap; }
+        td form { margin: 0; }
+        .setting-form { display: grid; grid-template-columns: minmax(180px, 1fr) 120px auto auto auto auto; gap: 8px; align-items: center; }
+        .setting-form input[type=text], .setting-form select { min-width: 0; width: 100%; box-sizing: border-box; }
+        .count { white-space: nowrap; color: #68707c; }
+        .archived { opacity: .62; }
+        .actions, .confirm-actions { display: flex; gap: 6px; margin-top: 6px; align-items: center; }
+        .work, .badge { display: inline-block; padding: 2px 6px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+        .work { margin-left: 6px; background: #eef4ff; color: #165dce; }
+        .badge.watch { background: #e8dcff; }
+        .badge.catalog { background: #dff3e4; }
+        .badge.match { background: #e9edf2; }
+        .badge.review { background: #fff0c9; }
+    </style>
+</head>
+<body>
+    <main>
+        <partial name="_Navigation" />
+        <h1>Artist設定</h1>
+        <div class="muted">設定は保存前にローカルCDとの一致件数を確認します。全作品収集は保存後にバックグラウンドで実行します。</div>
+
+        @if (!string.IsNullOrWhiteSpace(Model.StatusMessage))
+        {
+            <div class="status">@Model.StatusMessage</div>
+        }
+
+        @if (Model.Preview is { } preview)
+        {
+            <section class="card preview">
+                <h2>保存前の確認</h2>
+                <div><strong>@preview.Artist</strong> / @(preview.MatchType == ArtistMatchType.Exact ? "完全一致" : "部分一致")</div>
+                <div>
+                    @if (preview.IsWatchEnabled) { <span class="badge watch">新着Watch</span> }
+                    @if (preview.CollectFullCatalog) { <span class="badge catalog">全作品収集</span> }
+                    @if (preview.CollectFullCatalog && preview.ReviewInitialCatalogItems) { <span class="badge review">初回取得を未チェックへ</span> }
+                </div>
+                <div class="preview-grid">
+                    <div class="preview-stat"><span class="muted">一致する既存CD</span><strong>@preview.MatchCount</strong></div>
+                    <div class="preview-stat"><span class="muted">うち確認済み</span><strong>@preview.ReviewedMatchCount</strong></div>
+                    <div class="preview-stat"><span class="muted">新たに一致状態になるCD</span><strong>@preview.NewlyMatchedCount</strong></div>
+                    <div class="preview-stat"><span class="muted">未チェックへ戻せるCD</span><strong>@preview.ReopenCandidateCount</strong></div>
+                </div>
+                <div class="muted">初回取得を未チェックにする設定は、全作品収集で初めて新規発見されたCDだけに適用します。既にローカルにあるCDは下の再確認設定で選択します。</div>
+                <form method="post" asp-controller="Artists" asp-action="@(preview.Id.HasValue ? "Update" : "Add")" class="confirm-actions">
+                    @if (preview.Id.HasValue)
+                    {
+                        <input type="hidden" name="id" value="@preview.Id" />
+                    }
+                    <input type="hidden" name="artist" value="@preview.Artist" />
+                    <input type="hidden" name="matchType" value="@preview.MatchType" />
+                    <input type="hidden" name="isWatchEnabled" value="@preview.IsWatchEnabled.ToString().ToLowerInvariant()" />
+                    <input type="hidden" name="collectFullCatalog" value="@preview.CollectFullCatalog.ToString().ToLowerInvariant()" />
+                    <input type="hidden" name="reviewInitialCatalogItems" value="@preview.ReviewInitialCatalogItems.ToString().ToLowerInvariant()" />
+                    @if (preview.ReopenCandidateCount > 0)
+                    {
+                        <label class="check"><input type="checkbox" name="reopenExistingReviewedMatches" value="true" /> @preview.ReopenCandidateCount 件を未チェックへ戻す</label>
+                    }
+                    <button class="primary" type="submit">この内容で保存</button>
+                    <a href="/artists">キャンセル</a>
+                </form>
+            </section>
+        }
+
+        <section class="card">
+            <h2>追加</h2>
+            <form method="post" asp-controller="Artists" asp-action="Preview" class="form-row">
+                <label>アーティスト名<input type="text" name="artist" required /></label>
+                <label>
+                    一致方法
+                    <select name="matchType"><option value="Exact">完全一致</option><option value="Contains">部分一致</option></select>
+                </label>
+                <label class="check"><input type="checkbox" name="isWatchEnabled" value="true" checked /> 新着Watch</label>
+                <label class="check"><input type="checkbox" name="collectFullCatalog" value="true" /> 全作品収集</label>
+                <label class="check"><input type="checkbox" name="reviewInitialCatalogItems" value="true" /> 初回取得を未チェックへ</label>
+                <button class="primary" type="submit">一致を確認</button>
+            </form>
+        </section>
+
+        <section class="card">
+            <h2>設定一覧</h2>
+            @if (Model.Settings.Count == 0)
+            {
+                <div class="muted">Artist設定はまだありません。</div>
+            }
+            else
+            {
+                <table>
+                    <thead><tr><th>設定</th><th>現在一致</th><th>Catalog</th><th>操作</th></tr></thead>
+                    <tbody>
+                        @foreach (var setting in Model.Settings)
+                        {
+                            var catalogWorkActive = Model.ActiveCatalogSettingIds.Contains(setting.Id);
+                            <tr class="@(setting.IsArchived ? "archived" : "")">
+                                <td>
+                                    @if (!setting.IsArchived)
+                                    {
+                                        <form method="post" asp-controller="Artists" asp-action="Preview" class="setting-form">
+                                            <input type="hidden" name="id" value="@setting.Id" />
+                                            <input type="text" name="artist" value="@setting.Artist" required disabled="@catalogWorkActive" />
+                                            <select name="matchType" disabled="@catalogWorkActive">
+                                                @if (setting.MatchType == ArtistMatchType.Exact)
+                                                {
+                                                    <option value="Exact" selected>完全一致</option>
+                                                    <option value="Contains">部分一致</option>
+                                                }
+                                                else
+                                                {
+                                                    <option value="Exact">完全一致</option>
+                                                    <option value="Contains" selected>部分一致</option>
+                                                }
+                                            </select>
+                                            <label class="check"><input type="checkbox" name="isWatchEnabled" value="true" checked="@setting.IsWatchEnabled" disabled="@catalogWorkActive" /> Watch</label>
+                                            <label class="check"><input type="checkbox" name="collectFullCatalog" value="true" checked="@setting.CollectFullCatalog" disabled="@catalogWorkActive" /> 全作品</label>
+                                            @if (!setting.InitialCatalogCollectionCompleted)
+                                            {
+                                                <label class="check"><input type="checkbox" name="reviewInitialCatalogItems" value="true" checked="@setting.ReviewInitialCatalogItems" disabled="@catalogWorkActive" /> 初回を未チェック</label>
+                                            }
+                                            else
+                                            {
+                                                <span class="muted">初回取得済み</span>
+                                            }
+                                            <button type="submit" disabled="@catalogWorkActive">@(catalogWorkActive ? "処理中" : "変更を確認")</button>
+                                        </form>
+                                        <div>
+                                            <span class="badge match">@(setting.MatchType == ArtistMatchType.Exact ? "完全一致" : "部分一致")</span>
+                                            @if (setting.IsWatchEnabled) { <span class="badge watch">Watch</span> }
+                                            @if (setting.CollectFullCatalog) { <span class="badge catalog">全作品収集</span> }
+                                            @if (setting.ReviewInitialCatalogItems) { <span class="badge review">初回レビュー</span> }
+                                            @if (catalogWorkActive) { <span class="work">全作品収集 待機中 / 実行中</span> }
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <strong>@setting.Artist</strong> <span class="muted">(@(setting.MatchType == ArtistMatchType.Exact ? "完全一致" : "部分一致") / アーカイブ済み)</span>
+                                    }
+                                </td>
+                                <td class="count">@setting.CurrentMatchCount 件</td>
+                                <td class="count">@setting.ActiveCatalogCount 件</td>
+                                <td>
+                                    <div class="actions">
+                                        @if (!setting.IsArchived && setting.CollectFullCatalog)
+                                        {
+                                            <form method="post" asp-controller="Artists" asp-action="Collect">
+                                                <input type="hidden" name="id" value="@setting.Id" />
+                                                <button class="secondary" type="submit" disabled="@catalogWorkActive">全作品を再取得</button>
+                                            </form>
+                                        }
+                                        @if (!setting.IsArchived)
+                                        {
+                                            <form method="post" asp-controller="Artists" asp-action="Archive">
+                                                <input type="hidden" name="id" value="@setting.Id" />
+                                                <button class="archive" type="submit" disabled="@catalogWorkActive">アーカイブ</button>
+                                            </form>
+                                        }
+                                        else
+                                        {
+                                            <form method="post" asp-controller="Artists" asp-action="Restore">
+                                                <input type="hidden" name="id" value="@setting.Id" />
+                                                <button type="submit">復元</button>
+                                            </form>
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </section>
+    </main>
+</body>
+</html>
