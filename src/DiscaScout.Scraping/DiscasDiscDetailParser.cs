@@ -125,9 +125,9 @@ public sealed partial class DiscasDiscDetailParser
     [GeneratedRegex(@"作品詳細\s*(.*?)\s*ジャンル(?:\s|[：:])", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
     private static partial Regex DescriptionRegex();
 
-    // 詳細ページではジャンル階層ではなく表示用ジャンルが1項目だけ示されるため、
-    // 履歴インポート由来でジャンルが未取得のDiscを補完する大ジャンルとして利用する。
-    [GeneratedRegex(@"ジャンル\s*[：:]?\s*(.*?)(?=\s*(?:曲目|記番|メーカー|出演者|制作年|収録時間)\s*[：:]?)", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
+    // ナビゲーションにも「すべてのジャンル」という文言があるため、コロン付きの項目ラベルだけをジャンル欄として扱う。
+    // 値の直後にはアーティスト等の次項目が続くので、そこで明示的に打ち切りページ全体を取り込まないようにする。
+    [GeneratedRegex(@"(?:^|\s)ジャンル\s*[：:]\s*(.*?)(?=\s*(?:アーティスト|曲目|記番|メーカー|出演者|制作年|収録時間)\s*[：:]?)", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
     private static partial Regex GenreRegex();
 
     // 詳細ページには曲目が複数箇所へ重複表示されることがあるため、最初の曲目ブロックから次の記番までだけを対象にする。
