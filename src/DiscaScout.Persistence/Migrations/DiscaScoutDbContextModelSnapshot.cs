@@ -14,6 +14,6 @@ public sealed class DiscaScoutDbContextModelSnapshot : ModelSnapshot
     /// <inheritdoc />
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
-        RentalHistoryImportModelBuilder.Build(modelBuilder);
+        DetailImageUrlModelBuilder.Build(modelBuilder);
     }
 }
