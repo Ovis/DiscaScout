@@ -1,3 +1,4 @@
+using AngleSharp.Dom;
 using AngleSharp.Html.Parser;
 
 namespace DiscaScout.Scraping;
@@ -25,20 +26,37 @@ public sealed class DiscasGenreMasterParser
         // 実際のgenreAll.doはul/liのネストで階層を表していない。
         // 大ジャンルはppdis00033WrapB内のh2、配下ジャンルは同じブロック内の一覧として並び、
         // Gパラメータ自体が「01013,01072」のように親から子までの経路を保持している。
-        foreach (var anchor in document.QuerySelectorAll(".ppdis00033WrapB a[href]"))
+        foreach (var block in document.QuerySelectorAll(".ppdis00033WrapB"))
         {
-            var externalId = GetGenrePathId(anchor.GetAttribute("href"));
-            var name = Normalize(anchor.TextContent);
-            if (externalId is null || name is null || !seen.Add(externalId)) continue;
+            // ページ末尾には「オムニバス」集約用のdisplay:noneブロックが存在する。
+            // ここでは見出しのG値と子リンクの親G値が一致せず、通常のジャンル階層としては成立しないため
+            // マスターへ取り込まない。表示対象のジャンルブロックだけを正式なマスター情報として扱う。
+            if (IsHidden(block)) continue;
 
-            var parentExternalId = GetParentPathId(externalId);
-            var parentKey = parentExternalId ?? string.Empty;
-            nextSortOrder.TryGetValue(parentKey, out var sortOrder);
-            nextSortOrder[parentKey] = sortOrder + 1;
-            result.Add(new ScrapedGenre(externalId, name, parentExternalId, sortOrder));
+            foreach (var anchor in block.QuerySelectorAll("a[href]"))
+            {
+                var externalId = GetGenrePathId(anchor.GetAttribute("href"));
+                var name = Normalize(anchor.TextContent);
+                if (externalId is null || name is null || !seen.Add(externalId)) continue;
+
+                var parentExternalId = GetParentPathId(externalId);
+                var parentKey = parentExternalId ?? string.Empty;
+                nextSortOrder.TryGetValue(parentKey, out var sortOrder);
+                nextSortOrder[parentKey] = sortOrder + 1;
+                result.Add(new ScrapedGenre(externalId, name, parentExternalId, sortOrder));
+            }
         }
 
         return result;
+    }
+
+    private static bool IsHidden(IElement element)
+    {
+        var style = element.GetAttribute("style");
+        if (string.IsNullOrWhiteSpace(style)) return false;
+
+        var normalized = style.Replace(" ", string.Empty, StringComparison.Ordinal).ToLowerInvariant();
+        return normalized.Contains("display:none", StringComparison.Ordinal);
     }
 
     private static string? GetGenrePathId(string? href)
