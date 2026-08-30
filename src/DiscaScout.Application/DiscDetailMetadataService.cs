@@ -31,8 +31,15 @@ public sealed partial class DiscDetailMetadataService(
         var total = await incomplete.CountAsync(cancellationToken);
         var dueNow = await incomplete.CountAsync(x =>
             (x.DetailFetchedAt == null && (x.DetailLastAttemptAt == null || x.DetailLastAttemptAt <= retryBefore))
-            || (x.DetailFetchedAt != null && x.RentalStartDate != null && x.RentalStartDate <= today), cancellationToken);
-        var retryCooldown = await incomplete.CountAsync(x => x.DetailFetchedAt == null && x.DetailLastAttemptAt != null && x.DetailLastAttemptAt > retryBefore, cancellationToken);
+            || (x.DetailFetchedAt != null
+                && x.RentalStartDate != null
+                && x.RentalStartDate <= today
+                && (x.DetailLastAttemptAt == null || x.DetailLastAttemptAt <= x.DetailFetchedAt || x.DetailLastAttemptAt <= retryBefore)), cancellationToken);
+        var retryCooldown = await incomplete.CountAsync(x =>
+            x.DetailLastAttemptAt != null
+            && x.DetailLastAttemptAt > retryBefore
+            && (x.DetailFetchedAt == null || x.DetailLastAttemptAt > x.DetailFetchedAt)
+            && (x.DetailFetchedAt == null || (x.RentalStartDate != null && x.RentalStartDate <= today)), cancellationToken);
         var waitingForRentalStart = await incomplete.CountAsync(x => x.DetailFetchedAt != null && x.RentalStartDate != null && x.RentalStartDate > today, cancellationToken);
         return new DiscDetailFetchProgress(total, dueNow, retryCooldown, waitingForRentalStart);
     }
@@ -47,7 +54,10 @@ public sealed partial class DiscDetailMetadataService(
             .Where(x => !x.DetailRefreshCompleted)
             .Where(x =>
                 (x.DetailFetchedAt == null && (x.DetailLastAttemptAt == null || x.DetailLastAttemptAt <= retryBefore))
-                || (x.DetailFetchedAt != null && x.RentalStartDate != null && x.RentalStartDate <= today))
+                || (x.DetailFetchedAt != null
+                    && x.RentalStartDate != null
+                    && x.RentalStartDate <= today
+                    && (x.DetailLastAttemptAt == null || x.DetailLastAttemptAt <= x.DetailFetchedAt || x.DetailLastAttemptAt <= retryBefore)))
             .OrderBy(x => x.RentalHistoryImportedAt == null)
             .ThenBy(x => x.DetailFetchedAt != null)
             .ThenBy(x => x.DetailLastAttemptAt)
@@ -66,9 +76,17 @@ public sealed partial class DiscDetailMetadataService(
         if (state is null || state.DetailRefreshCompleted) return false;
 
         var now = clock.GetUtcNow().UtcDateTime;
+        var retryBefore = now - FailedAttemptRetryInterval;
         if (state.DetailFetchedAt is null)
-            return state.DetailLastAttemptAt is null || state.DetailLastAttemptAt <= now - FailedAttemptRetryInterval;
-        return state.RentalStartDate is not null && state.RentalStartDate <= GetJapanToday(now);
+            return state.DetailLastAttemptAt is null || state.DetailLastAttemptAt <= retryBefore;
+
+        if (state.RentalStartDate is null || state.RentalStartDate > GetJapanToday(now)) return false;
+
+        // レンタル開始前に成功した取得の直後は開始日到来時に再取得できるようにする一方、
+        // その再取得が失敗した場合はDetailLastAttemptAtが直前の成功時刻より新しくなるため6時間待機する。
+        return state.DetailLastAttemptAt is null
+            || state.DetailLastAttemptAt <= state.DetailFetchedAt
+            || state.DetailLastAttemptAt <= retryBefore;
     }
 
     /// <summary>指定CDの詳細ページを取得して補完メタデータを保存する</summary>
@@ -113,7 +131,13 @@ public sealed partial class DiscDetailMetadataService(
                     disc.GenreId,
                     resolvedGenre.Id);
             }
-            disc.GenreId = resolvedGenre?.Id;
+
+            // 詳細側のジャンルをマスターへ解決できた場合だけ上書きする。
+            // HTML変更や一時的なマスター不整合で解決できないときに、検索一覧で正常解決済みのGenreIdまで失わないためである。
+            if (resolvedGenre is not null)
+            {
+                disc.GenreId = resolvedGenre.Id;
+            }
 
             // レンタル履歴だけから作成したDiscは一覧クロールの正式メタデータを持たないため、
             // 詳細ページ取得時にタイトルとアーティストも補完する。
