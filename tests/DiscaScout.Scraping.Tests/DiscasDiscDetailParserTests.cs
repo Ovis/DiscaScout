@@ -11,19 +11,21 @@ public sealed class DiscasDiscDetailParserTests
         "https://movie-tsutaya.tsite.jp/netdvd/cd/goodsDetail.do?titleID=1234567890");
 
     /// <summary>
-    /// 商品名、アーティスト、レンタル開始日、作品詳細、2枚組アイコン、曲目を1ページから取得できることを確認する
+    /// 商品名、アーティスト、レンタル開始日、作品詳細、ジャンル、2枚組アイコン、曲目を1ページから取得できることを確認する
     /// </summary>
     [Fact]
     public void Parse_DetailPage_ExtractsMetadataAndTracks()
     {
         const string html = """
             <html><body>
+              <nav>すべてのジャンル J-POP ワールド ブラック／ソウル イージーリスニング</nav>
               <h1>作品タイトル / テストアーティスト</h1>
               <img src="/library/dis/img/tx_item_info03.png" alt="2枚組">
               <div>レンタル開始日：2026年09月10日</div>
               <h3>作品詳細</h3>
               <p>作品についての説明文です。</p>
-              <h3>ジャンル：</h3><div>アニメ</div>
+              <h3>ジャンル：</h3><div>アニメ／ゲーム ゲーム</div>
+              <h3>アーティスト：</h3><div>テストアーティスト</div>
               <h3>曲目 ：</h3>
               <div>1. オープニング (3分59秒)</div>
               <div>2. エンディング (4分04秒)</div>
@@ -39,6 +41,7 @@ public sealed class DiscasDiscDetailParserTests
         Assert.Equal(new DateOnly(2026, 9, 10), result.RentalStartDate);
         Assert.True(result.IsTwoDisc);
         Assert.Equal("作品についての説明文です。", result.Description);
+        Assert.Equal("アニメ／ゲーム ゲーム", result.GenreLarge);
         Assert.Collection(
             result.Tracks,
             track =>
@@ -86,6 +89,7 @@ public sealed class DiscasDiscDetailParserTests
               <h1>作品 / アーティスト</h1>
               <div>レンタル開始日：2026年08月01日</div>
               <h3>ジャンル：</h3><div>J-POP</div>
+              <h3>アーティスト：</h3><div>アーティスト</div>
             </body></html>
             """;
         var parser = new DiscasDiscDetailParser();
@@ -93,6 +97,7 @@ public sealed class DiscasDiscDetailParserTests
         var result = parser.Parse(html, DetailUri);
 
         Assert.False(result.IsTwoDisc);
+        Assert.Equal("J-POP", result.GenreLarge);
         Assert.Null(result.Description);
         Assert.Empty(result.Tracks);
     }
