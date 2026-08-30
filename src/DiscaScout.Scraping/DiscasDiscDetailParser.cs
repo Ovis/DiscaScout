@@ -17,7 +17,7 @@ public sealed partial class DiscasDiscDetailParser
     /// </summary>
     /// <param name="html">DISCASから取得してデコード済みの詳細HTML</param>
     /// <param name="pageUri">取得した詳細ページURL</param>
-    /// <returns>商品名、アーティスト、レンタル開始日、説明、2枚組判定、曲目、詳細用ジャケットURLを含む詳細情報</returns>
+    /// <returns>商品名、アーティスト、レンタル開始日、説明、ジャンル、2枚組判定、曲目、詳細用ジャケットURLを含む詳細情報</returns>
     /// <exception cref="DiscasDiscDetailParseException">商品名やレンタル開始日など必要な情報を取得できない場合</exception>
     public DiscasDiscDetail Parse(string html, Uri pageUri)
     {
@@ -42,6 +42,7 @@ public sealed partial class DiscasDiscDetailParser
             artist,
             rentalStartDate,
             ExtractDescription(normalizedText),
+            ExtractGenreLarge(normalizedText),
             isTwoDisc,
             ExtractTracks(normalizedText),
             ExtractDetailImageUrl(document, pageUri));
@@ -90,6 +91,14 @@ public sealed partial class DiscasDiscDetailParser
         return description.Length == 0 ? null : description;
     }
 
+    private static string? ExtractGenreLarge(string text)
+    {
+        var match = GenreRegex().Match(text);
+        if (!match.Success) return null;
+        var genre = match.Groups[1].Value.Trim();
+        return genre.Length == 0 ? null : genre;
+    }
+
     private static IReadOnlyList<ScrapedDiscTrack> ExtractTracks(string text)
     {
         var sectionMatch = TrackSectionRegex().Match(text);
@@ -116,6 +125,11 @@ public sealed partial class DiscasDiscDetailParser
     [GeneratedRegex(@"作品詳細\s*(.*?)\s*ジャンル(?:\s|[：:])", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
     private static partial Regex DescriptionRegex();
 
+    // 詳細ページではジャンル階層ではなく表示用ジャンルが1項目だけ示されるため、
+    // 履歴インポート由来でジャンルが未取得のDiscを補完する大ジャンルとして利用する。
+    [GeneratedRegex(@"ジャンル\s*[：:]?\s*(.*?)(?=\s*(?:曲目|記番|メーカー|出演者|制作年|収録時間)\s*[：:]?)", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
+    private static partial Regex GenreRegex();
+
     // 詳細ページには曲目が複数箇所へ重複表示されることがあるため、最初の曲目ブロックから次の記番までだけを対象にする。
     [GeneratedRegex(@"曲目\s*[：:]?\s*(.*?)(?=\s*記番(?:\s|[：:]))", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
     private static partial Regex TrackSectionRegex();
@@ -132,10 +146,11 @@ public sealed partial class DiscasDiscDetailParser
 /// <param name="Artist">DISCAS詳細ページ上のアーティスト名</param>
 /// <param name="RentalStartDate">レンタル開始日</param>
 /// <param name="Description">作品詳細。ページに説明がない場合はnull</param>
+/// <param name="GenreLarge">詳細ページに表示されたジャンル。取得できない場合はnull</param>
 /// <param name="IsTwoDisc">DISCASの2枚組アイコンが存在するかどうか</param>
 /// <param name="Tracks">曲目一覧</param>
 /// <param name="DetailImageUrl">詳細画面用のジャケット画像URL。取得できない場合はnull</param>
-public sealed record DiscasDiscDetail(string Title, string Artist, DateOnly RentalStartDate, string? Description, bool IsTwoDisc, IReadOnlyList<ScrapedDiscTrack> Tracks, string? DetailImageUrl);
+public sealed record DiscasDiscDetail(string Title, string Artist, DateOnly RentalStartDate, string? Description, string? GenreLarge, bool IsTwoDisc, IReadOnlyList<ScrapedDiscTrack> Tracks, string? DetailImageUrl);
 
 /// <summary>DISCAS詳細ページから取得した1曲分の情報を保持する</summary>
 /// <param name="TrackNumber">曲順</param>
