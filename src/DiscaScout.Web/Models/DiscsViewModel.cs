@@ -16,7 +16,9 @@ public sealed class DiscsViewModel
     public bool SearchDescription { get; init; }
     public bool SearchTracks { get; init; }
     public string? ArtistSearch { get; init; }
-    public string? Genre { get; init; }
+    public long? GenreLargeId { get; init; }
+    public long? GenreMiddleId { get; init; }
+    public long? GenreSmallId { get; init; }
     public bool ExcludeMaxi { get; init; }
     public bool ExcludeAlbum { get; init; }
     public string Rental { get; init; } = "all";
@@ -24,7 +26,7 @@ public sealed class DiscsViewModel
     public int PageSize { get; init; } = 50;
     public int PageNumber { get; init; } = 1;
     public IReadOnlyList<Disc> Items { get; init; } = [];
-    public IReadOnlyList<GenreGroup> GenreGroups { get; init; } = [];
+    public IReadOnlyList<GenreOption> GenreGroups { get; init; } = [];
     public int UncheckedCount { get; init; }
     public int PickupCount { get; init; }
     public int RentedCount { get; init; }
@@ -61,10 +63,29 @@ public sealed class DiscsViewModel
         return "旧作";
     }
 
-    public string GetTabUrl(string tab) => BuildListUrl(tab, tab == "unchecked" ? UncheckedFilter : "all", TitleSearch, SearchDescription, SearchTracks, ArtistSearch, Genre, ExcludeMaxi, ExcludeAlbum, Rental, Sort, PageSize, 1);
-    public string GetArtistUrl(string artist) => BuildListUrl(Tab, UncheckedFilter, TitleSearch, SearchDescription, SearchTracks, artist, Genre, ExcludeMaxi, ExcludeAlbum, Rental, Sort, PageSize, 1);
-    public string GetGenreUrl(string genre) => BuildListUrl(Tab, UncheckedFilter, TitleSearch, SearchDescription, SearchTracks, ArtistSearch, genre, ExcludeMaxi, ExcludeAlbum, Rental, Sort, PageSize, 1);
-    public string GetPageUrl(int page) => BuildListUrl(Tab, UncheckedFilter, TitleSearch, SearchDescription, SearchTracks, ArtistSearch, Genre, ExcludeMaxi, ExcludeAlbum, Rental, Sort, PageSize, page);
+    /// <summary>読み込み済みの親参照からルート順のジャンルパスを返す</summary>
+    public static IReadOnlyList<Genre> GetGenrePath(Disc disc)
+    {
+        if (disc.Genre is null) return [];
+        var result = new List<Genre>();
+        for (var current = disc.Genre; current is not null; current = current.Parent)
+            result.Add(current);
+        result.Reverse();
+        return result;
+    }
+
+    public string GetTabUrl(string tab) => BuildListUrl(tab, tab == "unchecked" ? UncheckedFilter : "all", TitleSearch, SearchDescription, SearchTracks, ArtistSearch, GenreLargeId, GenreMiddleId, GenreSmallId, ExcludeMaxi, ExcludeAlbum, Rental, Sort, PageSize, 1);
+    public string GetArtistUrl(string artist) => BuildListUrl(Tab, UncheckedFilter, TitleSearch, SearchDescription, SearchTracks, artist, GenreLargeId, GenreMiddleId, GenreSmallId, ExcludeMaxi, ExcludeAlbum, Rental, Sort, PageSize, 1);
+    public string GetPageUrl(int page) => BuildListUrl(Tab, UncheckedFilter, TitleSearch, SearchDescription, SearchTracks, ArtistSearch, GenreLargeId, GenreMiddleId, GenreSmallId, ExcludeMaxi, ExcludeAlbum, Rental, Sort, PageSize, page);
+
+    /// <summary>カード上のジャンルノードを階層選択として反映するURLを生成する</summary>
+    public string GetGenreUrl(IReadOnlyList<Genre> path, int selectedDepth)
+    {
+        var large = selectedDepth >= 0 ? path.ElementAtOrDefault(0)?.Id : null;
+        var middle = selectedDepth >= 1 ? path.ElementAtOrDefault(1)?.Id : null;
+        var small = selectedDepth >= 2 ? path.ElementAtOrDefault(2)?.Id : null;
+        return BuildListUrl(Tab, UncheckedFilter, TitleSearch, SearchDescription, SearchTracks, ArtistSearch, large, middle, small, ExcludeMaxi, ExcludeAlbum, Rental, Sort, PageSize, 1);
+    }
 
     private static string BuildListUrl(
         string tab,
@@ -73,7 +94,9 @@ public sealed class DiscsViewModel
         bool searchDescription,
         bool searchTracks,
         string? artist,
-        string? genre,
+        long? genreLargeId,
+        long? genreMiddleId,
+        long? genreSmallId,
         bool excludeMaxi,
         bool excludeAlbum,
         string rental,
@@ -89,7 +112,9 @@ public sealed class DiscsViewModel
             ["searchDescription"] = searchDescription ? "true" : null,
             ["searchTracks"] = searchTracks ? "true" : null,
             ["artist"] = artist,
-            ["genre"] = genre,
+            ["genreLarge"] = genreLargeId?.ToString(),
+            ["genreMiddle"] = genreMiddleId?.ToString(),
+            ["genreSmall"] = genreSmallId?.ToString(),
             ["excludeMaxi"] = excludeMaxi ? "true" : null,
             ["excludeAlbum"] = excludeAlbum ? "true" : null,
             ["rental"] = rental == "all" ? null : rental,
@@ -100,6 +125,6 @@ public sealed class DiscsViewModel
         return QueryHelpers.AddQueryString("/discs", parameters.Where(x => x.Value is not null).ToDictionary(x => x.Key, x => x.Value));
     }
 
-    public sealed record GenreGroup(string Name, IReadOnlyList<GenreMiddleGroup> MiddleGenres);
-    public sealed record GenreMiddleGroup(string Name, IReadOnlyList<string> SmallGenres);
+    /// <summary>一覧フィルター用ジャンルノードを保持する</summary>
+    public sealed record GenreOption(long Id, string Name, bool IsActive, IReadOnlyList<GenreOption> Children);
 }
