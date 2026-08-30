@@ -8,6 +8,7 @@
     var lastPagerPage = Math.Min(Model.TotalPages, Model.PageNumber + 2);
     var selectedLarge = Model.GenreGroups.SingleOrDefault(x => x.Id == Model.GenreLargeId);
     var selectedMiddle = selectedLarge?.Children.SingleOrDefault(x => x.Id == Model.GenreMiddleId);
+    var genreGroupsJson = System.Text.Json.JsonSerializer.Serialize(Model.GenreGroups);
 }
 <!doctype html>
 <html lang="ja">
@@ -357,16 +358,31 @@
         checks.forEach(x => x.addEventListener('change', updateBulk));
         if (bulkButton) bulkButton.addEventListener('click', () => form.requestSubmit());
 
-        // 親ジャンル変更時は子の選択を破棄して送信し、Controller側で新しい候補を描画する。
+        const genreGroups = @Html.Raw(genreGroupsJson);
         const genreLarge = document.getElementById('genre-large');
         const genreMiddle = document.getElementById('genre-middle');
         const genreSmall = document.getElementById('genre-small');
+
+        // フィルター適用のためにページを再読み込みしなくても階層を選べるよう、
+        // 大・中ジャンルの変更時にサーバーから埋め込んだマスター階層で子候補を再構築する。
+        const replaceGenreOptions = (select, genres) => {
+            if (!select) return;
+            select.replaceChildren(new Option('すべて', ''));
+            for (const genre of genres) {
+                select.add(new Option(`${genre.Name}${genre.IsActive ? '' : '（旧）'}`, String(genre.Id)));
+            }
+            select.disabled = genres.length === 0;
+        };
+
         genreLarge?.addEventListener('change', () => {
-            if (genreMiddle) genreMiddle.value = '';
-            if (genreSmall) genreSmall.value = '';
+            const large = genreGroups.find(x => String(x.Id) === genreLarge.value);
+            replaceGenreOptions(genreMiddle, large?.Children ?? []);
+            replaceGenreOptions(genreSmall, []);
         });
         genreMiddle?.addEventListener('change', () => {
-            if (genreSmall) genreSmall.value = '';
+            const large = genreGroups.find(x => String(x.Id) === genreLarge?.value);
+            const middle = large?.Children.find(x => String(x.Id) === genreMiddle.value);
+            replaceGenreOptions(genreSmall, middle?.Children ?? []);
         });
     </script>
 </body>
