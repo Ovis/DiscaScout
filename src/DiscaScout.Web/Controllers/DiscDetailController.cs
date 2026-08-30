@@ -21,15 +21,10 @@ public sealed class DiscDetailController(DiscaScoutDbContext dbContext, DiscDeta
 
         // 保存値は原文のまま維持し、詳細画面の表示モデルだけ句点ごとに改行して可読性を補う。
         if (!string.IsNullOrWhiteSpace(disc.Description))
-        {
             disc.Description = disc.Description.Replace("。", $"。{Environment.NewLine}", StringComparison.Ordinal);
-        }
 
         if (!disc.DetailRefreshCompleted)
-        {
-            // Web要求自体ではDISCASへアクセスせず、優先キューへ通知するだけにして画面表示を待たせない。
             detailFetchSignal.Request(id);
-        }
 
         return View(new DiscDetailViewModel
         {
@@ -63,7 +58,6 @@ public sealed class DiscDetailController(DiscaScoutDbContext dbContext, DiscDeta
         if (disc is null) return NotFound();
         if (!disc.IsRented)
         {
-            // 手動での再確認要求は自動差分理由ではないため、ReviewReasonを捏造せずNeedsReviewだけを戻す。
             disc.NeedsReview = true;
             await dbContext.SaveChangesAsync(cancellationToken);
             TempData[nameof(DiscDetailViewModel.StatusMessage)] = "未チェックへ戻しました";
@@ -100,9 +94,7 @@ public sealed class DiscDetailController(DiscaScoutDbContext dbContext, DiscDeta
         return RedirectToDetail(id, returnUrl);
     }
 
-    /// <summary>
-    /// 保存済みの詳細取得状態を未完了へ戻し、バックグラウンドでの再取得を優先要求する
-    /// </summary>
+    /// <summary>保存済みの詳細取得状態を未完了へ戻し、バックグラウンドでの再取得を優先要求する</summary>
     [HttpPost("{id:long}/refetch-detail")]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> RefetchDetail(long id, string? returnUrl, CancellationToken cancellationToken)
@@ -110,9 +102,6 @@ public sealed class DiscDetailController(DiscaScoutDbContext dbContext, DiscDeta
         var disc = await dbContext.Discs.SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
         if (disc is null) return NotFound();
 
-        // HTTP要求内でDISCASへ直接アクセスすると画面操作が外部サイトの応答待ちになるため、
-        // 取得済み状態だけを解除して既存の低速BackgroundServiceへ処理を委譲する。
-        // DetailFetchedAtをnullへ戻すことで、レンタル開始日が過去でもIsDueAsyncが即時取得対象として扱う。
         disc.DetailRefreshCompleted = false;
         disc.DetailFetchedAt = null;
         disc.DetailLastAttemptAt = null;
@@ -129,6 +118,7 @@ public sealed class DiscDetailController(DiscaScoutDbContext dbContext, DiscDeta
         .Include(x => x.ReviewReasons)
         .Include(x => x.ChangeHistory)
         .Include(x => x.Tracks)
+        .Include(x => x.Genre).ThenInclude(x => x!.Parent).ThenInclude(x => x!.Parent)
         .Include(x => x.ArtistMatches).ThenInclude(x => x.ArtistSetting)
         .Include(x => x.ArtistCatalogEntries).ThenInclude(x => x.ArtistSetting)
         .SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
