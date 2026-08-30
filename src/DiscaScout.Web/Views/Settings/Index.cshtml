@@ -2,11 +2,142 @@
 @{
     ViewData["Title"] = "DiscaScout 設定";
 }
-<!doctype html><html lang="ja"><head><meta charset="utf-8"/><title>@ViewData["Title"]</title><style>
-:root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif}body{margin:0;background:#f6f7f9;color:#20242a}main{max-width:900px;margin:0 auto;padding:28px}nav{display:flex;gap:14px;margin-bottom:18px;font-size:14px}nav a{color:#165dce;text-decoration:none}.card{background:white;border:1px solid #dfe3e8;border-radius:10px;padding:20px;margin-top:22px}label{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;margin-bottom:16px}select,input[type=url]{padding:9px;border:1px solid #c9ced6;border-radius:6px;background:white}input[type=url]{width:min(720px,95%)}button{border:0;border-radius:6px;padding:9px 15px;font-weight:650;cursor:pointer;background:#165dce;color:white}.secondary{background:#5f6b7a}.danger{background:#b42318}.actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.muted{color:#68707c;font-size:13px}.status{margin-top:18px;padding:12px 14px;background:#eef4ff;border:1px solid #cbdcff;border-radius:8px}.validation{color:#b42318;font-size:13px}.guard{border-top:1px solid #e6e9ed;padding:16px 0}.guard:first-of-type{border-top:0}.guard-title{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.badge{display:inline-block;border-radius:999px;padding:3px 8px;font-size:12px;font-weight:700;background:#eef1f5}.badge.warn{background:#fff2cc;color:#7a4d00}.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px 18px;margin:10px 0 14px;font-size:13px}.confirm{border:2px solid #b42318;background:#fff7f6}.confirm strong{color:#b42318}
-</style></head><body><main><partial name="_Navigation"/><h1>設定</h1><div class="muted">アプリケーション全体の設定を管理します。</div>
-@if(!string.IsNullOrWhiteSpace(Model.StatusMessage)){<div class="status">@Model.StatusMessage</div>}
-@if(Model.CountDropConfirmation is not null){var confirmation=Model.CountDropConfirmation;var latest=confirmation.LatestAnomaly;<section class="card confirm"><h2>急減許可の確認 — @SettingsViewModel.GetCategoryLabel(confirmation.Category)</h2><p><strong>この操作は件数安全装置を次回1回だけ解除します。</strong> DISCAS側を確認し、掲載件数の大幅減少が正当な変更だと判断できた場合だけ実行してください。</p><div class="facts"><div>現在の正常基準: <strong>@(confirmation.Baseline?.FetchedCount?.ToString()??"なし")件</strong></div><div>基準ページ数: @(confirmation.Baseline?.PageCount?.ToString()??"-")</div><div>直近異常件数: <strong>@(latest?.FetchedCount?.ToString()??"-")件</strong></div><div>直近異常ページ数: @(latest?.PageCount?.ToString()??"-")</div><div>直近異常発生: @(latest is null?"-":SettingsViewModel.ToJapanTime(latest.CompletedAt).ToString("yyyy-MM-dd HH:mm:ss")) JST</div></div><p class="muted">許可されるのは「前回正常件数の70%未満」という急減判定だけです。0件取得は許可後も常に異常として拒否されます。許可は急減スナップショットのDB反映が成功した時点で消費されます。</p><div class="actions"><form method="post" asp-controller="Settings" asp-action="EnableCountDropOverride"><input type="hidden" name="category" value="@confirmation.Category"/><button class="danger" type="submit">許可して今すぐ確認取得</button></form><a href="/settings">キャンセル</a></div></section>}
-<section class="card"><h2>スクレイピング件数安全装置</h2><div class="muted" style="margin-bottom:10px">正常にDB反映できた直前の件数を基準にし、0件または前回比70%未満の取得結果はDBへ反映せずRetryします。ページ数は判定には使わず参考情報として記録します。</div>@foreach(var guard in Model.ScrapeGuards){<div class="guard"><div class="guard-title"><strong>@SettingsViewModel.GetCategoryLabel(guard.Category)</strong>@if(guard.Settings.IsCountDropOverrideEnabled){<span class="badge warn">急減許可中</span>}else{<span class="badge">通常ガード</span>}</div><div class="facts"><div>正常基準: @(guard.Baseline?.FetchedCount?.ToString()??"なし")件</div><div>基準ページ数: @(guard.Baseline?.PageCount?.ToString()??"-")</div><div>直近異常: @(guard.LatestAnomaly?.FetchedCount?.ToString()??"-")件</div><div>許可日時: @(guard.Settings.CountDropOverrideEnabledAt.HasValue?SettingsViewModel.ToJapanTime(guard.Settings.CountDropOverrideEnabledAt.Value).ToString("yyyy-MM-dd HH:mm:ss")+" JST":"-")</div></div>@if(guard.Settings.IsCountDropOverrideEnabled){<form method="post" asp-controller="Settings" asp-action="CancelCountDropOverride"><input type="hidden" name="category" value="@guard.Category"/><button class="secondary" type="submit">急減許可を取り消す</button></form>}else{<form method="post" asp-controller="Settings" asp-action="PrepareCountDropOverride"><input type="hidden" name="category" value="@guard.Category"/><button class="secondary" type="submit">次回1回だけ急減を許可</button></form>}</div>}</section>
-<section class="card"><h2>Discord通知</h2><form method="post" asp-controller="Settings" asp-action="SaveDiscord"><label>通知モード<select name="discordMode"><option value="Off" selected="@(Model.DiscordMode==DiscordNotificationMode.Off)">通知しない</option><option value="FailureOnly" selected="@(Model.DiscordMode==DiscordNotificationMode.FailureOnly)">失敗時のみ</option><option value="SuccessAndFailure" selected="@(Model.DiscordMode==DiscordNotificationMode.SuccessAndFailure)">成功・失敗を通知</option></select></label><label>Webhook URL<input name="discordWebhookUrl" value="@Model.DiscordWebhookUrl" type="url" autocomplete="off" placeholder="https://discord.com/api/webhooks/..."/><span asp-validation-for="DiscordWebhookUrl" class="validation"></span></label><div class="muted" style="margin-bottom:16px">Webhook URLが未設定の場合は、通知モードにかかわらず送信しません。画像キャッシュ・作品詳細の個別取得失敗は通知対象外です。</div><div class="actions"><button type="submit">Discord設定を保存</button></div></form><form method="post" asp-controller="Settings" asp-action="TestDiscord" style="margin-top:10px"><button class="secondary" type="submit">テスト通知を送信</button> <span class="muted">保存済みのWebhook URLへ送信します。</span></form></section>
-</main></body></html>
+<!doctype html>
+<html lang="ja">
+<head>
+    <meta charset="utf-8" />
+    <title>@ViewData["Title"]</title>
+    <style>
+        :root { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+        body { margin: 0; background: #f6f7f9; color: #20242a; }
+        main { max-width: 900px; margin: 0 auto; padding: 28px; }
+        nav { display: flex; gap: 14px; margin-bottom: 18px; font-size: 14px; }
+        nav a { color: #165dce; text-decoration: none; }
+        .card { background: white; border: 1px solid #dfe3e8; border-radius: 10px; padding: 20px; margin-top: 22px; }
+        label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; margin-bottom: 16px; }
+        select, input[type=url] { padding: 9px; border: 1px solid #c9ced6; border-radius: 6px; background: white; }
+        input[type=url] { width: min(720px, 95%); }
+        button { border: 0; border-radius: 6px; padding: 9px 15px; font-weight: 650; cursor: pointer; background: #165dce; color: white; }
+        .secondary { background: #5f6b7a; }
+        .danger { background: #b42318; }
+        .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        .muted { color: #68707c; font-size: 13px; }
+        .status { margin-top: 18px; padding: 12px 14px; background: #eef4ff; border: 1px solid #cbdcff; border-radius: 8px; }
+        .validation { color: #b42318; font-size: 13px; }
+        .guard { border-top: 1px solid #e6e9ed; padding: 16px 0; }
+        .guard:first-of-type { border-top: 0; }
+        .guard-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .badge { display: inline-block; border-radius: 999px; padding: 3px 8px; font-size: 12px; font-weight: 700; background: #eef1f5; }
+        .badge.warn { background: #fff2cc; color: #7a4d00; }
+        .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px 18px; margin: 10px 0 14px; font-size: 13px; }
+        .confirm { border: 2px solid #b42318; background: #fff7f6; }
+        .confirm strong { color: #b42318; }
+    </style>
+</head>
+<body>
+    <main>
+        <partial name="_Navigation" />
+        <h1>設定</h1>
+        <div class="muted">アプリケーション全体の設定を管理します。</div>
+
+        @if (!string.IsNullOrWhiteSpace(Model.StatusMessage))
+        {
+            <div class="status">@Model.StatusMessage</div>
+        }
+
+        @if (Model.CountDropConfirmation is not null)
+        {
+            var confirmation = Model.CountDropConfirmation;
+            var latest = confirmation.LatestAnomaly;
+
+            <section class="card confirm">
+                <h2>急減許可の確認 — @SettingsViewModel.GetCategoryLabel(confirmation.Category)</h2>
+                <p><strong>この操作は件数安全装置を次回1回だけ解除します。</strong> DISCAS側を確認し、掲載件数の大幅減少が正当な変更だと判断できた場合だけ実行してください。</p>
+                <div class="facts">
+                    <div>現在の正常基準: <strong>@(confirmation.Baseline?.FetchedCount?.ToString() ?? "なし")件</strong></div>
+                    <div>基準ページ数: @(confirmation.Baseline?.PageCount?.ToString() ?? "-")</div>
+                    <div>直近異常件数: <strong>@(latest?.FetchedCount?.ToString() ?? "-")件</strong></div>
+                    <div>直近異常ページ数: @(latest?.PageCount?.ToString() ?? "-")</div>
+                    <div>直近異常発生: @(latest is null ? "-" : SettingsViewModel.ToJapanTime(latest.CompletedAt).ToString("yyyy-MM-dd HH:mm:ss")) JST</div>
+                </div>
+                <p class="muted">許可されるのは「前回正常件数の70%未満」という急減判定だけです。0件取得は許可後も常に異常として拒否されます。許可は急減スナップショットのDB反映が成功した時点で消費されます。</p>
+                <div class="actions">
+                    <form method="post" asp-controller="Settings" asp-action="EnableCountDropOverride">
+                        <input type="hidden" name="category" value="@confirmation.Category" />
+                        <button class="danger" type="submit">許可して今すぐ確認取得</button>
+                    </form>
+                    <a href="/settings">キャンセル</a>
+                </div>
+            </section>
+        }
+
+        <section class="card">
+            <h2>スクレイピング件数安全装置</h2>
+            <div class="muted" style="margin-bottom:10px">正常にDB反映できた直前の件数を基準にし、0件または前回比70%未満の取得結果はDBへ反映せずRetryします。ページ数は判定には使わず参考情報として記録します。</div>
+            @foreach (var guard in Model.ScrapeGuards)
+            {
+                <div class="guard">
+                    <div class="guard-title">
+                        <strong>@SettingsViewModel.GetCategoryLabel(guard.Category)</strong>
+                        @if (guard.Settings.IsCountDropOverrideEnabled)
+                        {
+                            <span class="badge warn">急減許可中</span>
+                        }
+                        else
+                        {
+                            <span class="badge">通常ガード</span>
+                        }
+                    </div>
+                    <div class="facts">
+                        <div>正常基準: @(guard.Baseline?.FetchedCount?.ToString() ?? "なし")件</div>
+                        <div>基準ページ数: @(guard.Baseline?.PageCount?.ToString() ?? "-")</div>
+                        <div>直近異常: @(guard.LatestAnomaly?.FetchedCount?.ToString() ?? "-")件</div>
+                        <div>許可日時: @(guard.Settings.CountDropOverrideEnabledAt.HasValue ? SettingsViewModel.ToJapanTime(guard.Settings.CountDropOverrideEnabledAt.Value).ToString("yyyy-MM-dd HH:mm:ss") + " JST" : "-")</div>
+                    </div>
+                    @if (guard.Settings.IsCountDropOverrideEnabled)
+                    {
+                        <form method="post" asp-controller="Settings" asp-action="CancelCountDropOverride">
+                            <input type="hidden" name="category" value="@guard.Category" />
+                            <button class="secondary" type="submit">急減許可を取り消す</button>
+                        </form>
+                    }
+                    else
+                    {
+                        <form method="post" asp-controller="Settings" asp-action="PrepareCountDropOverride">
+                            <input type="hidden" name="category" value="@guard.Category" />
+                            <button class="secondary" type="submit">次回1回だけ急減を許可</button>
+                        </form>
+                    }
+                </div>
+            }
+        </section>
+
+        <section class="card">
+            <h2>Discord通知</h2>
+            <form method="post" asp-controller="Settings" asp-action="SaveDiscord">
+                <label>
+                    通知モード
+                    <select name="discordMode">
+                        <option value="Off" selected="@(Model.DiscordMode == DiscordNotificationMode.Off)">通知しない</option>
+                        <option value="FailureOnly" selected="@(Model.DiscordMode == DiscordNotificationMode.FailureOnly)">失敗時のみ</option>
+                        <option value="SuccessAndFailure" selected="@(Model.DiscordMode == DiscordNotificationMode.SuccessAndFailure)">成功・失敗を通知</option>
+                    </select>
+                </label>
+                <label>
+                    Webhook URL
+                    <input name="discordWebhookUrl" value="@Model.DiscordWebhookUrl" type="url" autocomplete="off" placeholder="https://discord.com/api/webhooks/..." />
+                    <span asp-validation-for="DiscordWebhookUrl" class="validation"></span>
+                </label>
+                <div class="muted" style="margin-bottom:16px">Webhook URLが未設定の場合は、通知モードにかかわらず送信しません。画像キャッシュ・作品詳細の個別取得失敗は通知対象外です。</div>
+                <div class="actions">
+                    <button type="submit">Discord設定を保存</button>
+                </div>
+            </form>
+            <form method="post" asp-controller="Settings" asp-action="TestDiscord" style="margin-top:10px">
+                <button class="secondary" type="submit">テスト通知を送信</button>
+                <span class="muted">保存済みのWebhook URLへ送信します。</span>
+            </form>
+        </section>
+    </main>
+</body>
+</html>
