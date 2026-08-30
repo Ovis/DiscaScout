@@ -77,6 +77,7 @@
         <div class="tabs">
             <a class="@(Model.Tab == "unchecked" ? "active" : "")" href="@Model.GetTabUrl("unchecked")">未チェック @Model.UncheckedCount</a>
             <a class="@(Model.Tab == "pickup" ? "active" : "")" href="@Model.GetTabUrl("pickup")">★ ピックアップ @Model.PickupCount</a>
+            <a class="@(Model.Tab == "rented" ? "active" : "")" href="@Model.GetTabUrl("rented")">レンタル済み @Model.RentedCount</a>
             <a class="@(Model.Tab == "all" ? "active" : "")" href="@Model.GetTabUrl("all")">全件</a>
         </div>
 
@@ -97,6 +98,18 @@
 
         <form method="get" action="/discs" class="filters">
             <input type="hidden" name="tab" value="@Model.Tab" />
+            @if (Model.Tab == "unchecked")
+            {
+                <label>
+                    未チェック絞り込み
+                    <select name="uncheckedFilter">
+                        <option value="all" selected="@(Model.UncheckedFilter == "all")">すべて</option>
+                        <option value="upcoming" selected="@(Model.UncheckedFilter == "upcoming")">近日リリース</option>
+                        <option value="new" selected="@(Model.UncheckedFilter == "new")">新着</option>
+                        <option value="artist-watch" selected="@(Model.UncheckedFilter == "artist-watch")">Artist Watch</option>
+                    </select>
+                </label>
+            }
             <div class="title-filter">
                 <label>キーワード<input type="text" name="title" value="@Model.TitleSearch" placeholder="タイトルから検索" /></label>
                 <div class="title-options">
