@@ -1,580 +1,500 @@
 # DiscaScout Architecture
 
+最終更新: **2026-08-30 / main PR #40 反映済み**
+
+この文書は DiscaScout の現在の設計と主要な設計判断をまとめたものです。実装の最新状態は `current-state.md`、DISCAS HTML の解析仕様は `discas-scraping.md`、ジャンルマスターは `genre-master.md`、アクセス負荷制御は `scraping-policy.md` を参照してください。
+
 ## 1. 目的
 
-DiscaScout は、TSUTAYA DISCAS の CD 検索結果を定期的に収集し、新作・近日リリース作品を確認しやすくするためのローカル Web アプリケーションです。
+DiscaScout は、TSUTAYA DISCAS の CD「近日リリース」「新作」を定期収集し、過去に観測した作品やユーザー自身の確認・レンタル状態と組み合わせて管理するローカル Web アプリケーションです。
 
-DISCAS の検索 UI をそのまま代替することではなく、次の用途に必要なデータを継続的に蓄積し、ユーザー自身の確認状態やレンタル状態と組み合わせて管理することを目的とします。
+主な用途:
 
-- `近日リリース` と `新作` の定期収集
+- `近日リリース` / `新作` の定期収集
 - 前回確認後に追加・変更された CD の確認
-- 指定アーティストの新着検出
-- 指定アーティストの全作品カタログ収集
+- Artist Watch による指定アーティストの新着検出
+- Artist Catalog による指定アーティストの全作品収集
 - レンタル済み CD の管理
+- DISCAS レンタル履歴のインポート
 - 過去に観測した CD の検索
 
-DISCAS 全 CD の恒久的なミラーを作ることは目的としません。通常収集では、DiscaScout が実際に観測した近日リリース・新作を蓄積します。指定アーティストについてのみ、明示的な操作によって全作品を収集します。
+DISCAS 全 CD の恒久的なミラーを作ることは目的としません。通常収集では観測した近日リリース・新作だけを蓄積し、全作品検索はユーザーが指定したアーティストに限定します。
 
 ## 2. 基本構成
 
 ### 2.1 技術スタック
 
-現時点の採用方針は次のとおりです。
-
-- ASP.NET Core
+- ASP.NET Core MVC
 - .NET 10
 - EF Core
 - SQLite
-- Docker
-- HTTP 取得: `HttpClient`
-- HTML 解析: AngleSharp
+- HttpClient
+- AngleSharp
+- Docker / Docker Compose
 
-DISCAS の検索結果ページは `HttpClient` で取得できることを PoC で確認済みです。そのため、ブラウザ自動化は初期構成に含めません。静的 HTTP 取得では成立しない処理が後から判明した場合に限り Playwright 等を再検討します。
+ブラウザ自動化は DiscaScout 本体の通常スクレイピングには使用しません。認証が必要なレンタル履歴取得だけは、ログイン済みブラウザ上で動く Chrome Manifest V3 拡張へ分離しています。
 
-### 2.2 配置
+### 2.2 アプリケーション構成
 
-単一の ASP.NET Core アプリケーションとして構成します。
+単一 ASP.NET Core アプリケーション / 単一インスタンス運用です。
 
-- Web UI
-- スクレイピング処理
-- 定期実行
-- SQLite への永続化
-- 画像キャッシュ
+主な project:
 
-を同一アプリケーション内で扱います。
+- `DiscaScout.Core` — ドメインエンティティ、enum 等
+- `DiscaScout.Application` — 差分反映、Artist Watch、詳細補完、レンタル履歴取込等のユースケース
+- `DiscaScout.Persistence` — EF Core / SQLite
+- `DiscaScout.Scraping` — DISCAS HTTP 取得・解析・Throttle・ジャンル解決
+- `DiscaScout.Web` — MVC Controller / Razor View / BackgroundService
+- `DiscaScout.ScraperProbe` — 調査・検証用
 
-定期実行専用 Worker や別コンテナは初期構成では作りません。単一インスタンス運用を前提とします。
+Web UI、Scheduler、ManualWork、Retry、詳細取得、画像キャッシュは同じプロセスで動作します。別 Worker / 別コンテナへ分離しません。
 
-### 2.3 認証とアクセス制御
+### 2.3 MVC
 
-DiscaScout 自身にはユーザー認証・ユーザー管理を実装しません。単一ユーザー用途を前提とし、必要なアクセス制御は Traefik、ネットワーク、その他の外部レイヤーで行います。
+PR #28 で Razor Pages から ASP.NET Core MVC へ移行済みです。
 
-### 2.4 永続化とバックアップ
+公開 GET URL:
 
-SQLite DB とローカル保存した画像を永続ボリュームへ保存します。
+- `/discs`
+- `/discs/{id}`
+- `/artists`
+- `/operations`
+- `/settings`
 
-アプリケーション自身にはバックアップ機能を持たせません。バックアップはホスト側・ストレージ側で行います。
+Controller と ViewModel は画面単位で分離し、共通ナビゲーションは shared View に置きます。
 
-## 3. 実装順序
+### 2.4 認証とアクセス制御
 
-UI を先に作り込まず、データ取得と状態遷移の正しさを先に確立します。
+DiscaScout 自身にはユーザー認証・ユーザー管理を持たせません。単一ユーザー用途を前提とし、Traefik やネットワーク境界でアクセスを制限します。
 
-1. DISCAS 実ページの技術調査 / スクレイパー PoC
-2. ドメインモデルと DB スキーマ
-3. `近日リリース` / `新作` の通常スクレイパー
-4. 差分検出、Archive、ReviewReason、Artist Watch
-5. アーティスト全作品収集
-6. 画像ダウンロード / キャッシュ
-7. Scheduler、Retry、ScrapeRun、Discord 通知
-8. バックエンドテスト
-9. 最小限の管理 UI
-10. Inbox / Pickup / Catalog UI と表示調整
+## 3. 永続化
 
-UI 実装へ本格的に移る前に、少なくとも次を自動テストで再現できる状態を目標とします。
+SQLite を唯一の永続 DB とします。timestamp は SQLite で比較・ORDER BY 可能にするため UTC `DateTime` とし、表示時に JST へ変換します。
 
-- 全ページを取得してからカテゴリ単位でコミットできる
-- 同一データを再取得しても不要な変更が発生しない
-- タイトル変更を検出できる
-- 一時的な消失と連続消失を区別できる
-- Archive 後の再出現を検出できる
-- Artist Watch の新規一致を検出できる
-- 失敗・異常なクロール結果を部分コミットしない
+Docker 運用時はリポジトリ直下の `./data` を `/app/data` へ bind mount します。
 
-## 4. スクレイピング単位
+- `data/discascout.db`
+- `data/images/`
 
-通常収集対象は次の 2 カテゴリです。
+バックアップ機能はアプリケーションへ持たせず、ホスト / ストレージ側で行います。
 
-- `Upcoming` — DISCAS の `近日リリース`
-- `New` — DISCAS の `新作`
+## 4. Disc と通常 Source
 
-両カテゴリは独立したクロール・コミット単位とします。
+### 4.1 Disc
 
-例えば Upcoming が成功して New が失敗した場合、Upcoming はコミットしてよい一方、New は前回成功時の状態を維持します。
+`Disc` は DISCAS の CD 商品自体を表します。安定識別子は DISCAS `titleID` です。タイトルとアーティストの組み合わせは識別子にしません。
 
-1 カテゴリについては、全ページの取得・解析・検証が成功するまで DB の現在状態へ反映しません。途中ページまで取得できた状態で部分コミットすることは禁止します。
+主な情報:
 
-## 5. スクレイピング結果モデル
-
-検索結果から DB 更新前の中間データとして、概ね次の情報を保持します。
-
-```csharp
-public sealed record ScrapedDisc(
-    string DiscasId,
-    string ProductUrl,
-    string Title,
-    string Artist,
-    string? ImageUrl,
-    DateOnly? RentalStartDate,
-    DiscSourceCategory Category,
-    int SourceRank);
-```
-
-`RentalStartDate` は検索結果一覧から取得できない可能性が確認されているため nullable とします。レンタル開始日だけを取得するために商品詳細ページを全件クロールすることはしません。
-
-商品同一性には DISCAS の安定した識別子を使用します。タイトルとアーティストの組み合わせを合成キーにはしません。タイトル変更そのものを検出対象にするためです。
-
-## 6. データモデル
-
-以下は論理モデルです。実際の EF Core エンティティ設計時には、制約・Index・Navigation 等を具体化します。
-
-### 6.1 Disc
-
-CD 自体を表します。
-
-主な項目:
-
-- `Id`
 - `DiscasId`
 - `ProductUrl`
-- `Title`
-- `NormalizedTitle`
-- `Artist`
-- `NormalizedArtist`
-- `ImageUrl`
-- `ImagePath`
+- Title / NormalizedTitle
+- Artist / NormalizedArtist
+- `GenreId`
+- `ImageUrl` / `ImagePath`
+- `DetailImageUrl`
 - `RentalStartDate`
-- `FirstSeenAt`
-- `LastSeenAt`
-- `LastUpdatedAt`
+- `IsMaxi`
+- `IsTwoDisc`
+- Description / Tracks
+- FirstSeen / LastSeen / LastUpdated
 - `IsArchived`
 - `NeedsReview`
 - `LastReviewedAt`
 - `IsRented`
+- `RentalHistoryImportedAt`
+- 詳細取得状態
 
-観測済みの Disc は原則として物理削除しません。
+観測済み Disc は原則として物理削除しません。
 
-### 6.2 DiscSource
+### 4.2 DiscSource
 
-Disc がどの通常収集カテゴリに現在存在しているかを表します。
+通常収集カテゴリとの関係を Disc 本体から分離します。
 
-主な項目:
+カテゴリ:
 
-- `DiscId`
-- `Category`
-- `SourceRank`
-- `IsActive`
-- `MissingCount`
-- `LastSeenAt`
+- `Upcoming`
+- `New`
 
-1 枚の Disc が Upcoming と New の双方に関連する期間を許容するため、Disc とカテゴリを 1:N ではなく別 Relation として管理します。
+1 枚の Disc が両カテゴリへ同時に存在し得るため、カテゴリ状態は Relation として保持します。
 
-### 6.3 DiscReviewReason
+成功クロール時:
 
-現在ユーザー確認が必要な理由を保持します。
+- 今回存在 → `MissingCount=0`, Active
+- 今回不在 → `MissingCount += 1`
+- 2 回連続不在 → Inactive
 
-理由:
+失敗クロールでは MissingCount を進めません。
+
+すべての通常 Source が Inactive になった Disc は Archive します。ただしレンタル履歴インポート由来 Disc は通常 Source がなくても保持します。
+
+## 5. Review モデル
+
+現在確認が必要な理由を `DiscReviewReason` として複数保持できます。
 
 - `NEW`
 - `TITLE_CHANGED`
 - `ARTIST_MATCHED`
 - `REAPPEARED`
 
-複数理由が同時に存在することを許容します。確認済みにすると現在の理由を解消します。
+確認済み操作:
 
-### 6.4 DiscChangeHistory
+- `NeedsReview=false`
+- `LastReviewedAt` 更新
+- 現在の ReviewReason を削除
 
-意味のあるメタデータ変更を記録します。
+借りた操作:
 
-主な項目:
+- `IsRented=true`
+- `NeedsReview=false`
+- `LastReviewedAt` 更新
+- ReviewReason 削除
 
-- `DiscId`
-- `Field`
-- `OldValue`
-- `NewValue`
-- `ChangedAt`
+レンタル済み Disc は後続イベントによる Inbox 再オープンを抑止します。未レンタルへ戻しても自動的には未チェックへ戻しません。
 
-正規化後の値が変化した場合のみ記録します。表示上の空白や Unicode 表現だけが変わった場合は履歴を増やしません。
+## 6. 文字列正規化と変更履歴
 
-### 6.5 ArtistSetting
-
-Artist Watch と全作品収集の設定を統合して管理します。
-
-主な項目:
-
-- `Id`
-- `ArtistName`
-- `NormalizedArtistName`
-- `MatchType` (`Exact` / `Contains`)
-- `WatchEnabled`
-- `CollectFullCatalog`
-- `IsArchived`
-- `CreatedAt`
-
-既定の一致方法は `Exact` とします。正規表現は初期仕様に含めません。
-
-### 6.6 DiscArtistWatchMatch
-
-Disc と ArtistSetting の Watch 一致関係を保持します。
-
-現在一致しているかだけでなく、過去に一致していたことと現在一致していることを区別できる情報を保持します。
-
-これにより、同じ一致を毎週 `ARTIST_MATCHED` として再通知することを防ぎます。
-
-### 6.7 DiscArtistCatalog
-
-アーティスト全作品収集によって取得した Disc と ArtistSetting の関係を保持します。
-
-主な項目:
-
-- `DiscId`
-- `ArtistSettingId`
-- `IsActive`
-- `LastSeenAt`
-
-Disc の現在の Artist 表示が後から変わっても、「この ArtistSetting のカタログ収集で取得された」という provenance を失わないため、明示的な Relation とします。
-
-### 6.8 ScrapeRun
-
-スクレイピング実行履歴を恒久的に保存します。
-
-主な項目:
-
-- 実行日時
-- 実行種別 (`Scheduled` / `Manual` / `Retry`)
-- Category
-- 成否
-- 取得件数
-- 解析件数
-- 新規件数
-- 更新件数
-- 所要時間
-- 簡潔な失敗理由
-
-Stack trace や詳細な HTTP 情報は通常のアプリケーションログへ出力し、ScrapeRun には運用上必要な要約を保存します。
-
-## 7. 文字列正規化
-
-Title と Artist には共通の正規化を適用します。
+Title / Artist は共通で以下を適用します。
 
 - Unicode NFKC
-- 前後空白除去
-- 連続する空白を 1 個へ統合
-- 大文字小文字を区別しない比較
+- trim
+- whitespace collapse
+- uppercase invariant
 
-カナ変換や句読点除去などの積極的な正規化は行いません。
+表示文字列が変わっても正規化結果が同じ場合は意味のある変更として扱いません。正規化結果が変化した場合のみ変更履歴と `TITLE_CHANGED` の対象になります。
 
-表示文字列が変化しても正規化結果が同じ場合:
+Artist 変更だけでは原則 Review を再オープンしません。ただし変更後に新たな Artist Watch へ一致した場合は `ARTIST_MATCHED` を付与します。
 
-- 最新表示文字列へ更新する
-- `TITLE_CHANGED` は付与しない
-- `DiscChangeHistory` は追加しない
+## 7. ジャンルモデル
 
-正規化結果が変化した場合のみ意味のある変更として扱います。
+PR #40 で旧 `GenreLarge / GenreMiddle / GenreSmall` 文字列列を廃止しました。
 
-## 8. 通常カテゴリのライフサイクル
+### 7.1 Genre
 
-カテゴリごとの成功クロール時に DiscSource を更新します。
+DISCAS `genreAll.do` をジャンル体系の正とします。
 
-- 今回存在した: `MissingCount = 0`, `IsActive = true`
-- 今回存在しなかった: `MissingCount += 1`
-- 2 回連続で存在しなかった: `IsActive = false`
+`Genre` は自己参照ツリーです。
 
-失敗したクロールでは MissingCount を変更しません。
+- DISCAS `G` パラメータを外部 ID として保持
+- Parent / Children で階層化
+- Active / Inactive を保持
+- 消えたジャンルは削除せず Inactive 化
+- 再出現時は Reactivate
 
-すべての DiscSource が Inactive になった Disc は `IsArchived = true` とします。
+`Disc.GenreId` はその Disc に解決できた最深ジャンルノードを参照します。
 
-Archived Disc が再度通常カテゴリに現れた場合:
+### 7.2 マスター更新
 
-- 対応 DiscSource を Active へ戻す
-- Disc を Archive 解除する
-- レンタル済みでなければ `REAPPEARED` を付与する
+- 初回通常クロール前にジャンルマスターを準備
+- `/settings` から手動更新可能
+- 0件は異常
+- 既存 Active 件数の 75% 未満へ急減した場合も更新拒否
 
-Archive は論理状態であり、Disc・画像・履歴を削除しません。
+古い DB のジャンル文字列から新マスターを推測移行する設計は採用していません。本番運用前で DB 破棄可能という前提で、マスターは DISCAS 側から再構築します。
 
-## 9. 未チェック / 確認済み
+### 7.3 ジャンル解決
 
-確認状態は Disc 単位です。
+検索結果と詳細ページは共通 Resolver で完全パスをジャンルマスターへ解決します。
 
-- `NeedsReview`
-- `LastReviewedAt`
-- 未解消の `DiscReviewReason`
+詳細ページと検索結果で異なるジャンルが得られた場合は詳細ページ側を採用し、差異を警告ログに残します。
 
-確認済みにすると:
+一覧フィルターは `GenreId` ベースです。親ジャンル選択時は子孫ジャンルを含めて検索します。Inactive でも既存 Disc が参照中の Genre は選択肢に残します。
 
-- 現在の ReviewReason を解消する
-- `NeedsReview = false`
-- `LastReviewedAt` を更新する
+詳細は `genre-master.md` を参照してください。
 
-確認操作そのものの完全な履歴は初期仕様では保持しません。
+## 8. 通常スクレイピング
 
-### 9.1 再確認が必要になる変更
+通常収集対象は `Upcoming` と `New` です。カテゴリごとに独立した完全スナップショットとして処理します。
 
-レンタル済みでない場合、次のイベントで未チェックへ戻します。
+1. 全ページ HTTP 取得
+2. 解析
+3. hidden `titleId` と解析結果の完全性検証
+4. 件数安全装置
+5. DB 反映
 
-- 新規 Disc: `NEW`
-- 意味のある Title 変更: `TITLE_CHANGED`
-- 新たな Artist Watch 一致: `ARTIST_MATCHED`
-- Archive 後の再出現: `REAPPEARED`
+1 カテゴリ内では途中ページまでの部分コミットを行いません。Upcoming 成功 / New 失敗のようにカテゴリ間では独立してコミットできます。
 
-Artist の変更だけでは再確認にしません。ただし変更後に新たな Artist Watch 条件へ一致した場合は `ARTIST_MATCHED` とします。
+### 8.1 件数安全装置
 
-RentalStartDate や画像だけの変更では再確認にしません。
+通常カテゴリでは:
 
-## 10. レンタル済み状態
+- 0件を常に拒否
+- 最後の DB 反映成功 Run の件数に対し 70% 未満を拒否
+- 70% ちょうどは許可
 
-初期仕様では `Disc.IsRented` の boolean のみを保持します。
+拒否された Run は次回基準になりません。
 
-レンタル履歴、レンタル日、複数回レンタル等は扱いません。
+正当な急減はカテゴリ別の 1 回限り Override で受け入れられますが、0件は Override 不可です。Override は DB 反映成功後にのみ消費されます。
 
-`借りた` 操作時:
+## 9. DISCAS アクセス負荷制御
 
-- `IsRented = true`
-- ReviewReason を解消
-- `NeedsReview = false`
-- `LastReviewedAt` を更新
+最重要の固定制約です。詳細は `scraping-policy.md` を参照してください。
 
-レンタル済み Disc は、その後タイトル変更・再出現・Watch 一致が発生しても Inbox へ再表示しません。ただし意味のある変更履歴は記録して構いません。
+HTML 系アクセス:
 
-レンタル済みでも Artist Watch の Pickup 対象からは除外しません。
+- 全体で直列
+- request start は最低 2 秒間隔
+- 10 request ごとに 5～20 秒のランダム追加待機
 
-`IsRented` を false に戻す操作は詳細画面で確認付きとします。false に戻しただけでは確認状態を変更しません。必要なら別途「未チェックに戻す」を操作します。
+同じ制御対象:
 
-## 11. Artist Watch
+- Upcoming / New
+- Artist Catalog
+- Detail page
+- ジャンルマスター取得
 
-ArtistSetting を追加・編集した時点で、ローカル DB に存在する Disc を再評価します。
+詳細 worker は scrape 実行中に譲り、さらに CD ごとに約 15 秒空けます。
 
-設定適用前には、既存一致件数や既に確認済みの一致 Disc を確認できるようにし、必要なら既存一致 Disc を未チェックへ戻す選択肢を用意します。
+画像は別系統ですが bounded load:
 
-同一条件への継続一致では毎回 `ARTIST_MATCHED` を発生させません。
+- 40 IDs / batch
+- 最大 4 concurrent
+- batch 間 2 秒
+- 10 batch ごとに 5～20 秒追加待機
 
-Artist metadata の変更によって新規一致した場合は、レンタル済みでなければ `ARTIST_MATCHED` を付与します。
+検索結果やジャンルマスターで得られる情報のために detail page を追加取得しないことを原則とします。
 
-Watch を Disabled にした場合は Pickup から除外しますが、設定と過去の一致情報は保持します。
+## 10. Artist Watch / Artist Catalog
 
-## 12. アーティスト全作品収集
+### 10.1 ArtistSetting
 
-`ArtistSetting.CollectFullCatalog` を有効にした Artist について、DISCAS のアーティスト検索結果を全ページ取得します。
+1 つの設定で Watch と Catalog の両方を管理します。
 
-DISCAS の人物・アーティスト検索は、検索対象人物と商品に表示される Artist が一致しない結果を返す場合があることを確認しています。そのため検索結果を信用せず、取得後に表示 Artist を `Exact` または `Contains` 条件でローカル再判定します。
+- Artist name
+- Exact / Contains
+- Watch enabled
+- Collect full catalog
+- Archived
 
-### 12.1 実行タイミング
+### 10.2 Artist Watch
 
-- `CollectFullCatalog` を有効化したとき: 初回全取得
-- その後: 定期実行しない
-- Web UI の `全作品を再取得` で手動更新
+設定保存時にローカル Disc を即時再評価します。
 
-ArtistName または MatchType を変更し、CollectFullCatalog が有効な場合は全作品を再取得します。
+保存前には:
 
-### 12.2 初回 import
+- 一致件数
+- 確認済み件数
+- 新規一致件数
+- 再オープン可能件数
 
-全作品収集だけで初めて見つかった Disc には `NEW` を付与せず、通常 Inbox へは表示しません。
+をプレビューします。
 
-Artist Catalog は主としてレンタル済み / 未レンタルの在庫確認に使用します。
+現在一致と過去一致を Relation で区別し、同じ一致を繰り返し `ARTIST_MATCHED` として扱わないようにします。
 
-### 12.3 再取得時の消失
+### 10.3 Artist Catalog
 
-全作品の再取得が成功したにもかかわらず以前の Catalog Disc が存在しない場合、`DiscArtistCatalog.IsActive = false` とします。
+DISCAS アーティスト検索の全ページを取得し、結果 Artist 文字列を Exact / Contains で post-filter します。
 
-通常カテゴリと異なり、全作品収集は手動・明示的な全件取得なので 1 回の不在で Inactive とします。
+`DiscArtistCatalog` に ArtistSetting と Disc の provenance を保持します。
 
-### 12.4 設定停止・Archive
+- 初回収集
+- 条件変更時
+- 手動再取得
 
-CollectFullCatalog を off にしても取得済み Relation や Disc を削除しません。
+は ManualWork としてバックグラウンド実行します。周期的な全作品再取得は行いません。
 
-ArtistSetting 自体も物理削除せず Archive 可能とします。Archive 時は Watch / Catalog 処理を停止し、設定画面の通常一覧から隠します。
+Catalog-only Disc は通常 Source lifecycle と独立し、通常の `NEW` として Inbox へ入れません。
 
-復元時には以前の WatchEnabled / CollectFullCatalog 状態を復元します。Watch は直ちにローカル再評価しますが、全作品の自動再取得は行わず手動操作とします。
+## 11. 詳細メタデータ
 
-## 13. 画像
+詳細ページは低頻度の BackgroundService で補完します。
 
-Disc には外部 `ImageUrl` とローカル `ImagePath` を保持します。
+取得対象:
 
-画像は次の場合に取得します。
+- レンタル開始日
+- 作品詳細
+- 曲目
+- 2枚組
+- 詳細ジャケット URL
+- ジャンル
 
-- ローカル画像が存在しない Disc に有効な ImageUrl が現れた
-- ImageUrl が変更された
+ポリシー:
 
-同一 URL の画像内容が変わったかを検出するために毎回再取得することはしません。
+- 未取得 Disc は対象
+- ローカル詳細画面を開くと優先要求するが HTTP request 自体は待たない
+- レンタル履歴由来未取得 Disc を優先
+- 初回成功がレンタル開始前なら開始日以降にもう 1 回取得
+- 開始日以降の成功で完了
+- 失敗後は最低 6 時間待機
+- scrape 実行中は譲る
+- 1 件ずつ約 15 秒間隔
 
-URL 変更時は:
+`IsTwoDisc=null` は未確認を意味します。
 
-1. 新画像をダウンロード
-2. 正常に保存できたことを確認
-3. DB の参照を新画像へ切り替える
-4. 旧画像を削除
+## 12. 画像キャッシュ
 
-新画像の取得に失敗した場合は旧画像を保持します。
+画像取得は通常 scrape 成功条件から切り離します。
 
-画像取得失敗は CD メタデータやカテゴリ全体のコミットを失敗させません。
+DB の `ImageUrl / ImagePath` 状態を durable queue 相当として使い、専用 BackgroundService が補完します。
 
-Archived / Catalog Inactive になった Disc の画像も保持します。
+失敗画像が後続を止めないよう、pass 開始時に pending ID の snapshot を作ります。
 
-## 14. Scheduler と排他
+URL 更新時は新画像取得成功後に DB を切り替え、旧画像を削除します。失敗時は旧画像を保持します。
 
-定期実行は ASP.NET Core アプリ内の BackgroundService 等で実装します。
+レンタル履歴由来 Disc の詳細ページから MX 画像 URL を得た場合、詳細画面には MX を使用し、一覧用ローカルキャッシュには対応する SX URL を使用します。
 
-Web UI から設定する項目:
+## 13. Scheduler / Retry / ManualWork
 
-- Enabled
-- 曜日
-- 時刻
+### Scheduler
 
-Cron 式はユーザー設定として公開しません。
+- enabled / weekday / time を Web UI から設定
+- Asia/Tokyo 固定
+- 初期値 disabled / Sunday 04:00
+- 同日 catch-up
 
-スクレイピングジョブはアプリケーション全体で同時に 1 つだけ実行します。
+### Retry
 
-実行中は Web UI の手動取得ボタンを無効化し、現在処理中のカテゴリや進捗を表示します。
+- 通常失敗 → +3時間
+- Retry #1 失敗 → +1日
+- Retry #2 失敗 → 自動 Retry 終了
 
-通常の手動取得は Upcoming と New の両方を対象とします。失敗した ScrapeRun からの再実行では、失敗カテゴリだけを再実行できるようにします。
+Scheduled / Manual 成功時は対象カテゴリの pending Retry を cancel します。
 
-## 15. Retry
+### ManualWork
 
-1 回のカテゴリ取得中では短時間の HTTP retry を行います。それでも失敗した場合、カテゴリ単位で次の retry を予定します。
+SQLite に durable queue として保持します。
 
-1. 3 時間後
-2. 翌日に 1 回
-3. それでも失敗したら次回の通常定期実行まで停止
+- Pending
+- Running
+- Completed
+- Failed
 
-予定 retry より先に手動実行または次の有効な実行が成功した場合、古い retry はキャンセルします。
+種類:
 
-## 16. クロール結果の検証
+- FullScrape
+- CategoryScrape
+- ArtistCatalog
 
-HTTP 200 だけを成功条件にしません。DOM 変更や異常レスポンスを正常データとして DB へ反映しないため、コミット前に妥当性を検証します。
+Web request は enqueue 後すぐ返し、BackgroundService が処理します。起動時に残った Running は Pending へ戻します。
 
-少なくとも次を異常として扱います。
+実行優先順位:
 
-- parsed result が 0 件
-- 必須フィールド欠落や解析失敗が許容範囲を超えた
-- ページが示す総件数と実際の全ページ解析件数が一致しない
-- 前回成功時と比較して総件数が不自然に大幅減少した
+1. ManualWork
+2. due Retry
+3. Scheduled
 
-件数減少の具体的なしきい値は実データを継続観測してから決定します。
+全 scrape 系処理は `ScrapeExecutionGate` で単一実行です。
 
-異常なクロールは DB へコミットせず、通常の失敗と同じ retry / Discord 通知フローへ流します。
+## 14. Discord 通知
 
-## 17. Discord 通知
+設定は SQLite を正とし `/settings` から管理します。
 
-Webhook URL と通知モードを設定可能にします。
-
-モード:
+通知モード:
 
 - Off
-- Failure only（既定）
-- Success + Failure
+- FailureOnly
+- SuccessAndFailure
 
-成功通知には、通常カテゴリの取得件数、新規件数、タイトル変更件数、Watch 新規一致件数、未チェック件数などの集計を含めます。
+通知対象:
 
-すべての新規 CD を列挙することはせず、Artist Watch に新規一致した CD は通知内容へ含めます。
+- Scheduled / Manual / Retry のカテゴリ結果
+- Retry 予定
+- Artist Catalog 手動取得失敗
 
-通知の有無にかかわらず ScrapeRun は保存します。
+成功通知にはその scrape で新たに Artist Watch へ一致した Disc 数を含めます。同じ Disc が複数 Watch に一致しても 1 件です。
 
-## 18. Web UI
+Webhook 送信失敗は本体処理の成否や Retry 制御へ波及させません。画像・個別詳細取得失敗は通知対象外です。
 
-PC の Chrome / Edge を主対象とします。初期仕様ではモバイル・レスポンシブ対応を要件としません。
+## 15. レンタル履歴連携
 
-### 18.1 メイン画面
+### 15.1 本体へのインポート
 
-高密度な一覧を基本とし、大型カード UI にはしません。
+`/operations` から JSON を取り込みます。
 
-タブ:
+入力例:
 
-- `未チェック N`
-- `★ ピックアップ N`
-- `全件`
+```json
+[
+  {
+    "titleId": "0000102452",
+    "title": "断絶",
+    "artist": "井上陽水"
+  }
+]
+```
 
-主な検索・Filter:
+設計:
 
-- タイトル・アーティスト検索
-- Category
-- 状態
-- Sort
+- `titleId` で冪等
+- 既存 Disc と統合
+- 履歴だけに存在する CD も作成
+- `IsRented=true`, `NeedsReview=false`
+- `RentalHistoryImportedAt` で provenance を保持
+- 通常 Source がなくても保持
+- 後から通常クロールで見つかれば同じ Disc へ正式メタデータと Source を追加
+- 未取得なら detail enrichment を優先
 
-1 行には概ね次を表示します。
+### 15.2 Chrome exporter
 
-- 100〜120px 程度の画像
-- NEW / TITLE CHANGED / REAPPEARED / Pickup / Rented / Archived 等の badge
-- Title
-- Artist
-- Title 変更時の旧 Title
-- RentalStartDate
-- Category
-- `DISCASで開く` 外部リンク
+`tools/discas-rental-history-exporter/` に Chrome Manifest V3 拡張を置きます。
 
-行全体を DISCAS 外部リンクにはしません。Title からローカル詳細画面へ移動できる構成を想定します。
+認証情報を DiscaScout 本体へ持ち込まず、ログイン済みブラウザ内だけで履歴ページを取得します。
 
-### 18.2 検索
+- 全ページ直列
+- 最低 2 秒間隔
+- 10ページごとに 5～20 秒追加待機
+- Retry 10秒 → 30秒 → 60秒
+- `chrome.storage.local` に進捗保存
+- 完全性確認後に JSON 生成
+- `titleId` で重複排除
+- Cookie / 認証情報は出力しない
 
-Title と Artist を横断して部分一致検索します。
+## 16. Web UI 方針
 
-空白区切りの複数語は AND 条件とします。
+主要画面:
 
-例: `梶浦 OST` なら、Title + Artist を合わせた検索対象に `梶浦` と `OST` の双方が存在する Disc を返します。
+- `/discs` — 日常確認・検索・Review / Rented 操作
+- `/discs/{id}` — 詳細
+- `/artists` — Artist Watch / Catalog 設定
+- `/operations` — scrape / work / detail 補完 / import
+- `/settings` — Schedule / Discord / safety guard / Genre master
 
-通常は Active Disc のみ表示しますが、検索文字列が入力された場合は Archived Disc も自動的に検索対象へ含めます。
+CD 一覧ではタブ・検索・フィルター・並び順を組み合わせます。
 
-### 18.3 Pagination
+主なタブ:
 
-すべての一覧を Pagination します。
-
-Page size:
-
-- 50
-- 100
-- 200
-- 既定 50
-
-選択値は LocalStorage に保存します。
-
-`表示中のN件を確認済みにする` は現在ページかつ現在 Filter に一致する未チェック Disc のみを対象とし、確認 dialog を表示します。
-
-個別確認では行を直ちに未チェック一覧から消し、短時間の Undo を提供します。
-
-バックグラウンド取得完了による一覧の自動 refresh は行いません。SignalR や polling も初期仕様には含めません。
-
-### 18.4 Sort
-
-少なくとも次を用意します。
-
-- 新規検出 / 更新順
-- レンタル開始日の新しい順
-- レンタル開始日の古い順
-- Title
-- Artist
-
-RentalStartDate が取得できない場合でも、DISCAS 検索結果上の `SourceRank` を保持しているためソース順序を再現できます。
-
-### 18.5 詳細画面
-
-主な表示・操作:
-
-- Image
-- Title
-- Artist
-- RentalStartDate
-- 現在 Category
-- FirstSeen / LastSeen
-- Change history
-- Artist Watch match
-- DISCAS 外部リンク
-- Rented 状態編集
-- `未チェックに戻す`
-
-DISCAS 外部リンクは新しいタブで開きます。
-
-## 19. Artist Catalog UI
-
-Artist Catalog はレンタル在庫確認を主用途とし、既定で未レンタルを表示します。
-
-Filter:
-
-- 未レンタル
+- 未チェック
+- Pickup
 - レンタル済み
-- すべて
+- 全件
 
-Checkbox による複数選択と `選択したCDをレンタル済みにする` を提供します。
+タイトル検索は任意で Description / Tracks も対象にできます。検索語は空白区切り AND です。
 
-誤操作リスクが高いため「表示中をすべてレンタル済みにする」のような一括操作は初期仕様に含めません。
+ジャンルは正規化 Genre tree を利用し、大 / 中 / 小の連動フィルターとして扱います。
 
-## 20. 将来検討事項
+ページャーは前後移動だけでなく、現在ページ前後2ページ、先頭・末尾、`…` を表示します。
 
-### 20.1 DISCAS レンタル履歴 import
+## 17. Docker 配置
 
-DISCAS へログインしてレンタル履歴を自動取得する機能は初期仕様から除外します。
+`Dockerfile` と `compose.yaml` を `main` に保持します。
 
-将来的には PC ブラウザ上でユーザーがレンタル履歴を表示し、ChatGPT / browser integration 等で抽出した CSV を DiscaScout へ import するワークフローを検討できます。
+- .NET 10 multi-stage build
+- host 8080
+- `restart: unless-stopped`
+- `TZ=Asia/Tokyo`
+- `/health` healthcheck
+- `./data:/app/data` bind mount
 
-CSV schema や import 仕様は現時点では決定しません。
+アプリケーション自身には認証を持たないため、実運用では Traefik / LAN 等の境界で公開範囲を制限します。
 
-### 20.2 Playwright
+## 18. 開発上の原則
 
-現在の検索結果は HttpClient + AngleSharp で取得・解析できています。将来 DISCAS 側の実装変更により JavaScript 実行が必須になった場合のみ Playwright 等を再検討します。
+- `main` はコード
+- `docs` は設計・調査資料専用 orphan branch
+- 機能変更は feature branch → PR → CI → merge
+- `docs` 更新は直接 commit 可
+- 明示されない限り PR を自動 merge しない
+- write API では branch を明示し、default branch への暗黙書き込みをしない
+
+コードコメント:
+
+- 日本語・常体
+- 「何を」より「なぜ」を残す
+- 新規 / 変更 class、主要 public / internal method は原則 XML documentation
+- 負荷制御、順序、retry、concurrency、互換性、安全性の意図を積極的に記述
+
+## 19. 現在地
+
+2026-08-30 時点で主要バックエンド、日常 UI、件数安全装置、Artist Watch / Catalog、詳細補完、画像キャッシュ、Discord、レンタル履歴 import/export、Docker 配置、ジャンルマスター正規化まで実装済みです。
+
+現在の `main` は **PR #40 マージ後**を基準とします。
