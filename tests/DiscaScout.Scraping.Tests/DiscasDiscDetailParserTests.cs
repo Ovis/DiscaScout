@@ -98,15 +98,19 @@ public sealed class DiscasDiscDetailParserTests
     }
 
     /// <summary>
-    /// 完了判定の基準になるレンタル開始日を取得できないページを正常取得として扱わないことを確認する
+    /// レンタル開始日の記載がない詳細ページも、商品情報自体を解析できる場合は正常取得として扱うことを確認する
     /// </summary>
     [Fact]
-    public void Parse_DetailPageWithoutRentalStartDate_Throws()
+    public void Parse_DetailPageWithoutRentalStartDate_ReturnsNullDate()
     {
         const string html = "<html><body><h1>作品 / アーティスト</h1><h3>作品詳細</h3><p>説明のみ</p></body></html>";
         var parser = new DiscasDiscDetailParser();
 
-        Assert.Throws<DiscasDiscDetailParseException>(() => parser.Parse(html, DetailUri));
+        var result = parser.Parse(html, DetailUri);
+
+        Assert.Equal("作品", result.Title);
+        Assert.Equal("アーティスト", result.Artist);
+        Assert.Null(result.RentalStartDate);
     }
 
     /// <summary>

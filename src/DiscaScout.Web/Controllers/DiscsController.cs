@@ -40,7 +40,7 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
 
         var uncheckedCount = await dbContext.Discs.CountAsync(IsUnchecked(), cancellationToken);
         var pickupCount = await dbContext.Discs.CountAsync(x => x.ArtistMatches.Any(m => m.IsCurrentMatch && !m.ArtistSetting.IsArchived && m.ArtistSetting.IsWatchEnabled), cancellationToken);
-        var rentedCount = await dbContext.Discs.CountAsync(x => x.IsRented && !x.IsArchived, cancellationToken);
+        var rentedCount = await dbContext.Discs.CountAsync(x => x.IsRented, cancellationToken);
 
         var query = dbContext.Discs.AsNoTracking()
             .Include(x => x.ReviewReasons)
@@ -289,7 +289,9 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
     private static IQueryable<Disc> ApplyTab(IQueryable<Disc> query, string tab, bool hasSearchFilters) => tab switch
     {
         "pickup" => query.Where(x => x.ArtistMatches.Any(m => m.IsCurrentMatch && !m.ArtistSetting.IsArchived && m.ArtistSetting.IsWatchEnabled)),
-        "rented" => query.Where(x => x.IsRented && !x.IsArchived),
+        // Archiveは通常スクレイピング上の状態であり、ユーザーが記録したレンタル履歴とは別軸なので、
+        // レンタル済みタブではArchivedかどうかに関係なくIsRentedを表示する。
+        "rented" => query.Where(x => x.IsRented),
         "all" when hasSearchFilters => query,
         "all" => query.Where(x => !x.IsArchived),
         _ => query.Where(IsUnchecked())

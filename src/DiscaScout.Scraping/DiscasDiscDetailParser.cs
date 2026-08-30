@@ -16,7 +16,7 @@ public sealed partial class DiscasDiscDetailParser
         ArgumentNullException.ThrowIfNull(html); ArgumentNullException.ThrowIfNull(pageUri);
         var document = htmlParser.ParseDocument(html);
         var normalizedText = NormalizeText(document.Body?.TextContent ?? document.DocumentElement.TextContent);
-        var rentalStartDate = ParseRentalStartDate(normalizedText) ?? throw new DiscasDiscDetailParseException($"レンタル開始日を取得できない: {pageUri}");
+        var rentalStartDate = ParseRentalStartDate(normalizedText);
         var (title, artist) = ParseTitleAndArtist(document.QuerySelector("h1")?.TextContent, pageUri);
         var isTwoDisc = document.Images.Any(image => image.GetAttribute("src")?.Contains(TwoDiscImageFileName, StringComparison.OrdinalIgnoreCase) == true);
         return new DiscasDiscDetail(title, artist, rentalStartDate, ExtractDescription(normalizedText), ExtractGenrePath(document), isTwoDisc, ExtractTracks(normalizedText), ExtractDetailImageUrl(document, pageUri));
@@ -88,7 +88,7 @@ public sealed partial class DiscasDiscDetailParser
 }
 
 /// <summary>DISCAS詳細ページから取得したCD情報を保持する</summary>
-public sealed record DiscasDiscDetail(string Title, string Artist, DateOnly RentalStartDate, string? Description, IReadOnlyList<string> GenrePath, bool IsTwoDisc, IReadOnlyList<ScrapedDiscTrack> Tracks, string? DetailImageUrl);
+public sealed record DiscasDiscDetail(string Title, string Artist, DateOnly? RentalStartDate, string? Description, IReadOnlyList<string> GenrePath, bool IsTwoDisc, IReadOnlyList<ScrapedDiscTrack> Tracks, string? DetailImageUrl);
 /// <summary>DISCAS詳細ページから取得した1曲分の情報を保持する</summary>
 public sealed record ScrapedDiscTrack(int TrackNumber, string Title, string? Duration);
 /// <summary>DISCAS詳細ページを安全に解析できない場合に発生する例外</summary>
