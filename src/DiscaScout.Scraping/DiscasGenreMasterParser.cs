@@ -9,19 +9,31 @@ public sealed class DiscasGenreMasterParser
     private readonly HtmlParser parser = new();
 
     /// <summary>ジャンルマスターページを解析する</summary>
+    /// <param name="html">DISCASから取得してデコード済みの「すべてのジャンル」HTML</param>
+    /// <returns>外部ID、表示名、親外部ID、兄弟内表示順を持つジャンル一覧</returns>
     public IReadOnlyList<ScrapedGenre> Parse(string html)
     {
         ArgumentNullException.ThrowIfNull(html);
         var document = parser.ParseDocument(html);
         var result = new List<ScrapedGenre>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
+        var nextSortOrder = new Dictionary<string, int>(StringComparer.Ordinal);
+
         foreach (var anchor in document.QuerySelectorAll("a[href]"))
         {
             var externalId = GetGenreId(anchor.GetAttribute("href"));
             var name = Normalize(anchor.TextContent);
             if (externalId is null || name is null || name == "すべてのジャンル" || !seen.Add(externalId)) continue;
-            result.Add(new ScrapedGenre(externalId, name, FindParentGenreId(anchor), result.Count));
+
+            var parentExternalId = FindParentGenreId(anchor);
+            // SortOrderは兄弟間だけで意味を持つ。ページ全体の通番を保存すると親が異なるだけで
+            // 表示順が不自然になるため、親外部IDごとに0始まりで採番する。
+            var parentKey = parentExternalId ?? string.Empty;
+            nextSortOrder.TryGetValue(parentKey, out var sortOrder);
+            nextSortOrder[parentKey] = sortOrder + 1;
+            result.Add(new ScrapedGenre(externalId, name, parentExternalId, sortOrder));
         }
+
         return result;
     }
 
@@ -41,6 +53,7 @@ public sealed class DiscasGenreMasterParser
         if (string.IsNullOrWhiteSpace(href)) return null;
         var queryIndex = href.IndexOf('?');
         if (queryIndex < 0) return null;
+
         foreach (var part in href[(queryIndex + 1)..].Split('&', StringSplitOptions.RemoveEmptyEntries))
         {
             var separator = part.IndexOf('=');
@@ -50,6 +63,7 @@ public sealed class DiscasGenreMasterParser
             var value = Uri.UnescapeDataString(part[(separator + 1)..].Replace('+', ' ')).Trim();
             return value.Length == 0 || value.Contains(',') ? null : value;
         }
+
         return null;
     }
 
@@ -61,4 +75,8 @@ public sealed class DiscasGenreMasterParser
 }
 
 /// <summary>DISCASジャンルマスターページから取得した1ノードを保持する</summary>
+/// <param name="ExternalId">DISCASのジャンルリンクに含まれるGパラメータ</param>
+/// <param name="Name">表示名</param>
+/// <param name="ParentExternalId">親ジャンルのGパラメータ。ルートの場合はnull</param>
+/// <param name="SortOrder">同一親配下での表示順</param>
 public sealed record ScrapedGenre(string ExternalId, string Name, string? ParentExternalId, int SortOrder);
