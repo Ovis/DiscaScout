@@ -14,9 +14,11 @@
         body { margin: 0; background: #f6f7f9; color: #20242a; }
         main { max-width: 1180px; margin: 0 auto; padding: 28px; }
         nav { display: flex; gap: 14px; margin-bottom: 18px; font-size: 14px; }
-        nav a { color: #165dce; text-decoration: none; }
+        nav a, .disc-link { color: #165dce; text-decoration: none; }
+        nav a:hover, .disc-link:hover { text-decoration: underline; }
         h1 { margin: 0 0 6px; font-size: 28px; }
         h2 { margin-top: 0; font-size: 19px; }
+        h3 { margin: 18px 0 8px; font-size: 15px; }
         .muted { color: #68707c; font-size: 14px; }
         .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 22px; }
         .card { background: white; border: 1px solid #dfe3e8; border-radius: 10px; padding: 20px; }
@@ -103,6 +105,29 @@
                     <div class="stat"><span class="muted">その他未完了</span><strong>@detailProgress.OtherIncomplete</strong></div>
                 </div>
                 <p class="muted">「現在の取得待ち」を1件ずつ低速で補完します。未完了総数には、失敗後の待機中やレンタル開始待ちも含まれます。通常スクレイピング中は詳細取得を一時停止します。</p>
+
+                @if (detailProgress.RetryCooldownItems.Count > 0)
+                {
+                    <h3>失敗後6時間待機中のCD</h3>
+                    <table>
+                        <thead><tr><th>CD</th><th>DISCAS ID</th><th>直前成功（JST）</th><th>最終試行（JST）</th><th>再試行可能（JST）</th></tr></thead>
+                        <tbody>
+                            @foreach (var disc in detailProgress.RetryCooldownItems)
+                            {
+                                <tr>
+                                    <td>
+                                        <a class="disc-link" href="/discs/@disc.Id?returnUrl=@Uri.EscapeDataString("/operations")">@disc.Title</a>
+                                        <div class="muted">@disc.Artist</div>
+                                    </td>
+                                    <td><code>@disc.DiscasId</code></td>
+                                    <td>@(disc.LastSuccessfulFetchAt.HasValue ? OperationsViewModel.ToJapanTime(disc.LastSuccessfulFetchAt.Value).ToString("yyyy-MM-dd HH:mm:ss") : "なし")</td>
+                                    <td>@OperationsViewModel.ToJapanTime(disc.LastAttemptAt).ToString("yyyy-MM-dd HH:mm:ss")</td>
+                                    <td>@OperationsViewModel.ToJapanTime(disc.RetryAfter).ToString("yyyy-MM-dd HH:mm:ss")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
             </section>
 
             <section class="card full">
