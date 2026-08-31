@@ -21,7 +21,7 @@ public sealed partial class DiscDetailMetadataService(
     private static readonly TimeZoneInfo JapanTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Asia/Tokyo");
     private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
 
-    /// <summary>現在の詳細情報補完の進捗件数を取得する</summary>
+    /// <summary>現在の詳細情報補完の進捗件数と失敗後待機中のCDを取得する</summary>
     public async Task<DiscDetailFetchProgress> GetProgressAsync(CancellationToken cancellationToken = default)
     {
         var now = clock.GetUtcNow().UtcDateTime;
@@ -35,13 +35,41 @@ public sealed partial class DiscDetailMetadataService(
                 && x.RentalStartDate != null
                 && x.RentalStartDate <= today
                 && (x.DetailLastAttemptAt == null || x.DetailLastAttemptAt <= x.DetailFetchedAt || x.DetailLastAttemptAt <= retryBefore)), cancellationToken);
-        var retryCooldown = await incomplete.CountAsync(x =>
+
+        // 件数表示と対象一覧が別条件にならないよう、失敗後クールダウンの条件は同じクエリへ集約する。
+        // DetailLastAttemptAtが直前の成功より新しい場合、その試行は成功完了していないため失敗後待機として扱う。
+        var retryCooldownQuery = incomplete.Where(x =>
             x.DetailLastAttemptAt != null
             && x.DetailLastAttemptAt > retryBefore
             && (x.DetailFetchedAt == null || x.DetailLastAttemptAt > x.DetailFetchedAt)
-            && (x.DetailFetchedAt == null || (x.RentalStartDate != null && x.RentalStartDate <= today)), cancellationToken);
+            && (x.DetailFetchedAt == null || (x.RentalStartDate != null && x.RentalStartDate <= today)));
+        var retryCooldown = await retryCooldownQuery.CountAsync(cancellationToken);
+        var retryCooldownRows = await retryCooldownQuery
+            .OrderBy(x => x.DetailLastAttemptAt)
+            .ThenBy(x => x.Id)
+            .Select(x => new
+            {
+                x.Id,
+                x.DiscasId,
+                x.Title,
+                x.Artist,
+                x.DetailFetchedAt,
+                x.DetailLastAttemptAt
+            })
+            .ToListAsync(cancellationToken);
+        var retryCooldownItems = retryCooldownRows
+            .Select(x => new DiscDetailRetryCooldownItem(
+                x.Id,
+                x.DiscasId,
+                x.Title,
+                x.Artist,
+                x.DetailFetchedAt,
+                x.DetailLastAttemptAt!.Value,
+                x.DetailLastAttemptAt.Value + FailedAttemptRetryInterval))
+            .ToArray();
+
         var waitingForRentalStart = await incomplete.CountAsync(x => x.DetailFetchedAt != null && x.RentalStartDate != null && x.RentalStartDate > today, cancellationToken);
-        return new DiscDetailFetchProgress(total, dueNow, retryCooldown, waitingForRentalStart);
+        return new DiscDetailFetchProgress(total, dueNow, retryCooldown, waitingForRentalStart, retryCooldownItems);
     }
 
     /// <summary>現在取得すべき詳細情報があるCDを1件返す</summary>
@@ -194,9 +222,24 @@ public sealed partial class DiscDetailMetadataService(
     private static partial Regex MediumJacketSuffixRegex();
 }
 
-/// <summary>詳細情報バックグラウンド補完の進捗件数を保持する</summary>
-public sealed record DiscDetailFetchProgress(int IncompleteTotal, int DueNow, int RetryCooldown, int WaitingForRentalStart)
+/// <summary>詳細情報バックグラウンド補完の進捗件数と待機対象を保持する</summary>
+public sealed record DiscDetailFetchProgress(
+    int IncompleteTotal,
+    int DueNow,
+    int RetryCooldown,
+    int WaitingForRentalStart,
+    IReadOnlyList<DiscDetailRetryCooldownItem> RetryCooldownItems)
 {
     /// <summary>既知の待機区分に該当しない未完了件数</summary>
     public int OtherIncomplete => Math.Max(0, IncompleteTotal - DueNow - RetryCooldown - WaitingForRentalStart);
 }
+
+/// <summary>詳細取得失敗後の6時間クールダウン中にあるCDの運用表示情報を保持する</summary>
+public sealed record DiscDetailRetryCooldownItem(
+    long Id,
+    string DiscasId,
+    string Title,
+    string Artist,
+    DateTime? LastSuccessfulFetchAt,
+    DateTime LastAttemptAt,
+    DateTime RetryAfter);
