@@ -3,13 +3,29 @@ using DiscaScout.Persistence;
 using DiscaScout.Scraping;
 using DiscaScout.Web;
 using Microsoft.EntityFrameworkCore;
+using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 var databasePath = builder.Configuration["DiscaScout:DatabasePath"] ?? "data/discascout.db";
 var imageCachePath = builder.Configuration["DiscaScout:ImageCachePath"] ?? "data/images";
+var logPath = builder.Configuration["DiscaScout:LogPath"] ?? "data/logs/discascout-.log";
 var databaseDirectory = Path.GetDirectoryName(Path.GetFullPath(databasePath));
+var logDirectory = Path.GetDirectoryName(Path.GetFullPath(logPath));
 if (!string.IsNullOrEmpty(databaseDirectory)) Directory.CreateDirectory(databaseDirectory);
+if (!string.IsNullOrEmpty(logDirectory)) Directory.CreateDirectory(logDirectory);
 Directory.CreateDirectory(Path.GetFullPath(imageCachePath));
+
+// 標準のコンソールログはそのまま残し、永続化が必要な運用ログだけを追加のSerilog Providerでdata配下へ複製する。
+// 日次ローテーションに加えて31日を超えたファイルを削除し、長期運用でログが無制限に増えないようにする。
+var fileLogger = new LoggerConfiguration()
+    .MinimumLevel.Verbose()
+    .WriteTo.File(
+        Path.GetFullPath(logPath),
+        rollingInterval: RollingInterval.Day,
+        retainedFileCountLimit: 31,
+        retainedFileTimeLimit: TimeSpan.FromDays(31))
+    .CreateLogger();
+builder.Logging.AddSerilog(fileLogger, dispose: true);
 
 builder.Services.AddControllersWithViews();
 builder.Services.AddDbContext<DiscaScoutDbContext>(options => options.UseSqlite($"Data Source={databasePath}"));
