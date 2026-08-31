@@ -48,7 +48,7 @@
         button.bulk { background: #165dce; }
         .status { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; padding: 10px 12px; background: #eef4ff; border: 1px solid #cbdcff; border-radius: 7px; }
         .status form { margin: 0; }
-        .toolbar { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 12px; }
+        .toolbar { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
         .disc-list { display: flex; flex-direction: column; gap: 8px; }
         .disc { display: grid; grid-template-columns: 28px 92px minmax(0, 1fr) auto; gap: 12px; min-height: 118px; background: white; border: 1px solid #dfe3e8; border-radius: 8px; padding: 10px; }
         .select-disc { display: flex; align-items: flex-start; justify-content: center; padding-top: 36px; }
@@ -210,28 +210,7 @@
             <button type="submit">適用</button>
         </form>
 
-        @if (reviewablePageItems.Length > 0 || rentablePageItems.Length > 0)
-        {
-            <div class="toolbar">
-                @if (reviewablePageItems.Length > 0)
-                {
-                    <form method="post" asp-controller="Discs" asp-action="ReviewPage" onsubmit="return confirm('現在ページの未チェック @reviewablePageItems.Length 件をすべて確認済みにしますか？');">
-                        @foreach (var d in reviewablePageItems)
-                        {
-                            <input type="hidden" name="ids" value="@d.Id" />
-                        }
-                        <input type="hidden" name="returnUrl" value="@returnUrl" />
-                        <button class="bulk" type="submit">このページの未チェックをすべて確認済み</button>
-                    </form>
-                }
-                @if (rentablePageItems.Length > 0)
-                {
-                    <button type="button" class="rented" id="rent-selected" disabled>選択したCDを借りた</button>
-                }
-            </div>
-        }
-
-        <form method="post" asp-controller="Discs" asp-action="RentSelected" id="bulk-rent-form" onsubmit="return confirm(document.querySelectorAll('.disc-select:checked').length+' 件を借りた状態にしますか？');">
+        <form method="post" asp-controller="Discs" asp-action="RentSelected" id="bulk-rent-form" onsubmit="return confirm(document.querySelectorAll('.disc-select:checked').length+' 件をレンタル済みに更新しますか？');">
             <input type="hidden" name="returnUrl" value="@returnUrl" />
             <div class="disc-list">
                 @foreach (var disc in Model.Items)
@@ -307,6 +286,27 @@
                 }
             </div>
         </form>
+
+        @if (reviewablePageItems.Length > 0 || rentablePageItems.Length > 0)
+        {
+            <div class="toolbar">
+                @if (reviewablePageItems.Length > 0)
+                {
+                    <form method="post" asp-controller="Discs" asp-action="ReviewPage" onsubmit="return confirm('現在ページの未チェック @reviewablePageItems.Length 件をすべて確認済みにしますか？');">
+                        @foreach (var d in reviewablePageItems)
+                        {
+                            <input type="hidden" name="ids" value="@d.Id" />
+                        }
+                        <input type="hidden" name="returnUrl" value="@returnUrl" />
+                        <button class="bulk" type="submit">このページの未チェックをすべて確認済み</button>
+                    </form>
+                }
+                @if (rentablePageItems.Length > 0)
+                {
+                    <button type="button" class="rented" id="rent-selected" disabled>選択したCDをレンタル済みに更新</button>
+                }
+            </div>
+        }
 
         <div class="pager">
             <span>@Model.TotalCount 件 / @Model.PageNumber / @Model.TotalPages ページ</span>
