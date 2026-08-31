@@ -26,9 +26,10 @@ if (!string.IsNullOrEmpty(logDirectory))
 Directory.CreateDirectory(Path.GetFullPath(imageCachePath));
 
 // 標準のコンソールログはそのまま残し、永続化が必要な運用ログだけを追加のSerilog Providerでdata配下へ複製する。
+// ファイル側のログレベルは設定から読み込み、通常時は不要な詳細ログを抑えつつ障害調査時だけ再起動で詳細化できるようにする。
 // 日次ローテーションに加えて31日を超えたファイルを削除し、長期運用でログが無制限に増えないようにする。
 var fileLogger = new LoggerConfiguration()
-    .MinimumLevel.Verbose()
+    .ReadFrom.Configuration(builder.Configuration.GetSection("DiscaScout:FileLogging"))
     .WriteTo.File(
         Path.GetFullPath(logPath),
         rollingInterval: RollingInterval.Day,
