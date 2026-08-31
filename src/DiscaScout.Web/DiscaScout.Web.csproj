@@ -5,6 +5,10 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../DiscaScout.Application/DiscaScout.Application.csproj" />
     <ProjectReference Include="../DiscaScout.Persistence/DiscaScout.Persistence.csproj" />
     <ProjectReference Include="../DiscaScout.Scraping/DiscaScout.Scraping.csproj" />
