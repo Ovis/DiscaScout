@@ -59,6 +59,9 @@ await using (var scope = app.Services.CreateAsyncScope())
     await dbContext.Database.MigrateAsync();
 }
 
+// 一覧画面の非同期操作など、wwwroot配下のクライアント資産を配信する。
+app.UseStaticFiles();
+
 app.MapGet("/", () => Results.Redirect("/discs"));
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
