@@ -38,10 +38,10 @@
         }, 4000);
     };
 
-    const individualActions = new Set([
-        '/discs/reviewed',
-        '/discs/rented',
-        '/discs/reopen'
+    const individualActions = new Map([
+        ['/discs/reviewed', title => `「${title}」を確認済みに変更しました`],
+        ['/discs/rented', title => `「${title}」をレンタル済みに変更しました`],
+        ['/discs/reopen', title => `「${title}」を未チェックに変更しました`]
     ]);
 
     // 個別操作は一括レンタル用formのformactionを利用しているため、そのままsubmitすると
@@ -51,9 +51,11 @@
         if (!(submitter instanceof HTMLButtonElement)) return;
 
         const actionUrl = new URL(submitter.formAction, location.href);
-        if (!individualActions.has(actionUrl.pathname)) return;
+        const messageFactory = individualActions.get(actionUrl.pathname);
+        if (!messageFactory) return;
 
         event.preventDefault();
+        event.stopImmediatePropagation();
         submitter.disabled = true;
 
         const card = submitter.closest('.disc');
@@ -65,6 +67,8 @@
         });
 
         try {
+            // 既存POSTエンドポイントのリダイレクト互換性は維持し、画面側だけ非同期化する。
+            // fetchはリダイレクト先まで処理するが、そのHTMLは画面へ反映しないためスクロール位置は変わらない。
             const response = await fetch(actionUrl.pathname, {
                 method: 'POST',
                 headers: {
@@ -78,8 +82,7 @@
                 throw new Error(`HTTP ${response.status}`);
             }
 
-            const result = await response.json();
-            showNotice(result.message);
+            showNotice(messageFactory(title));
             card?.remove();
 
             // カード削除後に選択済みチェックボックスが残っていない場合は一括ボタンを無効化する。
