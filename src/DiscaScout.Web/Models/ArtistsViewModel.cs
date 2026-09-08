@@ -3,6 +3,15 @@ using DiscaScout.Core;
 namespace DiscaScout.Web.Models;
 
 /// <summary>
+/// Artist追加時の取得方法を表す
+/// </summary>
+public enum ArtistAcquisitionMode
+{
+    SaveSetting = 0,
+    OneShot = 1
+}
+
+/// <summary>
 /// Artist設定画面へ渡す設定一覧と保存前プレビューを保持する
 /// </summary>
 public sealed class ArtistsViewModel
@@ -28,9 +37,11 @@ public sealed class ArtistsViewModel
         long? Id,
         string Artist,
         ArtistMatchType MatchType,
+        ArtistAcquisitionMode AcquisitionMode,
         bool IsWatchEnabled,
         bool CollectFullCatalog,
         bool ReviewInitialCatalogItems,
+        bool ReviewOneShotItems,
         int MatchCount,
         int ReviewedMatchCount,
         int NewlyMatchedCount,
