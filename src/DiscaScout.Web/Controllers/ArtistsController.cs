@@ -1,3 +1,4 @@
+using DiscaScout.Application;
 using DiscaScout.Core;
 using DiscaScout.Persistence;
 using DiscaScout.Web.Models;
@@ -13,6 +14,7 @@ namespace DiscaScout.Web.Controllers;
 public sealed class ArtistsController(
     DiscaScoutDbContext dbContext,
     ArtistWatchService artistWatchService,
+    OneShotArtistCatalogCollectionService oneShotArtistCatalogCollectionService,
     ManualWorkStore manualWorkStore,
     ManualWorkSignal manualWorkSignal) : Controller
 {
@@ -20,10 +22,19 @@ public sealed class ArtistsController(
     [HttpGet("")]
     public async Task<IActionResult> Index(CancellationToken cancellationToken) => View(await LoadAsync(null, cancellationToken));
 
-    /// <summary>設定保存前にローカルCDへの一致影響を確認する</summary>
+    /// <summary>設定保存または一回限り取得の実行前にローカルCDへの一致影響を確認する</summary>
     [HttpPost("preview")]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> Preview(long? id, string artist, ArtistMatchType matchType, bool isWatchEnabled, bool collectFullCatalog, bool reviewInitialCatalogItems, CancellationToken cancellationToken)
+    public async Task<IActionResult> Preview(
+        long? id,
+        string artist,
+        ArtistMatchType matchType,
+        ArtistAcquisitionMode acquisitionMode,
+        bool isWatchEnabled,
+        bool collectFullCatalog,
+        bool reviewInitialCatalogItems,
+        bool reviewOneShotItems,
+        CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(artist))
         {
@@ -36,7 +47,19 @@ public sealed class ArtistsController(
             return RedirectToAction(nameof(Index));
         }
 
-        var preview = await BuildPreviewAsync(id, artist, matchType, isWatchEnabled, collectFullCatalog, reviewInitialCatalogItems, cancellationToken);
+        // 既存設定の編集では取得方法を切り替えず、従来どおりArtist設定の更新として扱う。
+        if (id.HasValue) acquisitionMode = ArtistAcquisitionMode.SaveSetting;
+
+        var preview = await BuildPreviewAsync(
+            id,
+            artist,
+            matchType,
+            acquisitionMode,
+            isWatchEnabled,
+            collectFullCatalog,
+            reviewInitialCatalogItems,
+            reviewOneShotItems,
+            cancellationToken);
         return View("Index", await LoadAsync(preview, cancellationToken));
     }
 
@@ -64,6 +87,32 @@ public sealed class ArtistsController(
         {
             TempData[nameof(ArtistsViewModel.StatusMessage)] = "Artist設定を追加しました";
         }
+        return RedirectToAction(nameof(Index));
+    }
+
+    /// <summary>Artist設定を保存せず、指定アーティストの全作品を一回だけ取得する</summary>
+    [HttpPost("one-shot")]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> OneShot(
+        string artist,
+        ArtistMatchType matchType,
+        bool reviewOneShotItems,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(artist))
+        {
+            TempData[nameof(ArtistsViewModel.StatusMessage)] = "アーティスト名を入力してください";
+            return RedirectToAction(nameof(Index));
+        }
+
+        var result = await oneShotArtistCatalogCollectionService.CollectAsync(
+            artist,
+            matchType,
+            reviewOneShotItems,
+            cancellationToken);
+
+        TempData[nameof(ArtistsViewModel.StatusMessage)] =
+            $"一回限りの全作品取得が完了しました。検索 {result.SearchResultCount} 件 / 条件一致 {result.MatchedCount} 件 / 新規追加 {result.AddedDiscCount} 件";
         return RedirectToAction(nameof(Index));
     }
 
@@ -142,7 +191,16 @@ public sealed class ArtistsController(
         return RedirectToAction(nameof(Index));
     }
 
-    private async Task<ArtistsViewModel.ArtistSettingPreview> BuildPreviewAsync(long? id, string artist, ArtistMatchType matchType, bool isWatchEnabled, bool collectFullCatalog, bool reviewInitialCatalogItems, CancellationToken cancellationToken)
+    private async Task<ArtistsViewModel.ArtistSettingPreview> BuildPreviewAsync(
+        long? id,
+        string artist,
+        ArtistMatchType matchType,
+        ArtistAcquisitionMode acquisitionMode,
+        bool isWatchEnabled,
+        bool collectFullCatalog,
+        bool reviewInitialCatalogItems,
+        bool reviewOneShotItems,
+        CancellationToken cancellationToken)
     {
         var normalizedArtist = DiscTextNormalizer.Normalize(artist);
         var matchingDiscs = await dbContext.Discs.AsNoTracking()
@@ -169,14 +227,18 @@ public sealed class ArtistsController(
 
         var newlyMatched = matchingDiscs.Where(x => !currentMatchIds.Contains(x.Id)).ToArray();
         var reviewedCount = matchingDiscs.Count(x => !x.NeedsReview);
-        var reopenCandidateCount = isWatchEnabled ? newlyMatched.Count(x => !x.NeedsReview && !x.IsRented) : 0;
+        var reopenCandidateCount = acquisitionMode == ArtistAcquisitionMode.SaveSetting && isWatchEnabled
+            ? newlyMatched.Count(x => !x.NeedsReview && !x.IsRented)
+            : 0;
         return new ArtistsViewModel.ArtistSettingPreview(
             id,
             artist.Trim(),
             matchType,
+            acquisitionMode,
             isWatchEnabled,
             collectFullCatalog,
             reviewInitialCatalogItems,
+            reviewOneShotItems,
             matchingDiscs.Count,
             reviewedCount,
             newlyMatched.Length,
