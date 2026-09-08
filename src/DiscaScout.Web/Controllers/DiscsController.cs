@@ -298,7 +298,13 @@ public sealed class DiscsController(DiscaScoutDbContext dbContext) : Controller
     };
 
     private static System.Linq.Expressions.Expression<Func<Disc, bool>> IsUnchecked() =>
-        x => x.NeedsReview && !x.IsRented && (!x.IsArchived || x.ArtistCatalogEntries.Any(c => c.IsActive));
+        // Artist全作品取得由来のCDは通常カテゴリに存在しないためArchivedだが、
+        // 一回限り取得で未チェック指定されたCDもレビュー対象として表示する必要がある。
+        x => x.NeedsReview
+            && !x.IsRented
+            && (!x.IsArchived
+                || x.ArtistCatalogEntries.Any(c => c.IsActive)
+                || x.ReviewReasons.Any(r => r.Reason == DiscReviewReasonType.ArtistMatched));
 
     private static IQueryable<Disc> ApplyUncheckedFilter(IQueryable<Disc> query, string tab, string filter)
     {
