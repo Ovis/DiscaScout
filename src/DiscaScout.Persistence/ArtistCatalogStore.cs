@@ -1,8 +1,6 @@
 using DiscaScout.Core;
 using DiscaScout.Scraping;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace DiscaScout.Persistence;
 
@@ -12,11 +10,9 @@ namespace DiscaScout.Persistence;
 public sealed class ArtistCatalogStore(
     DiscaScoutDbContext dbContext,
     GenreResolver genreResolver,
-    TimeProvider? timeProvider = null,
-    ILogger<ArtistCatalogStore>? logger = null)
+    TimeProvider? timeProvider = null)
 {
     private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
-    private readonly ILogger<ArtistCatalogStore> logger = logger ?? NullLogger<ArtistCatalogStore>.Instance;
 
     /// <summary>テスト用に時刻プロバイダーだけを指定して初期化する</summary>
     public ArtistCatalogStore(DiscaScoutDbContext dbContext, TimeProvider timeProvider)
@@ -115,44 +111,15 @@ public sealed class ArtistCatalogStore(
         var matchedCount = 0;
         var addedDiscCount = 0;
 
-        logger.LogInformation(
-            "一回限りArtist一致判定を開始します。Target={Target}, NormalizedTarget={NormalizedTarget}, MatchType={MatchType}, SearchResultCount={SearchResultCount}",
-            artist,
-            normalizedTarget,
-            matchType,
-            snapshot.Products.Count);
-
         foreach (var scraped in snapshot.Products)
         {
             var normalizedArtist = DiscTextNormalizer.Normalize(scraped.Artist);
-            var matched = IsMatch(normalizedArtist, normalizedTarget, matchType);
-
-            // K検索は汎用検索なので、検索結果からどのArtist文字列が抽出され、
-            // 後段の一致判定で採用・除外されたかを診断できるよう一時的に全件を記録する。
-            logger.LogInformation(
-                "一回限りArtist一致判定: Title={Title}, ScrapedArtist={ScrapedArtist}, NormalizedArtist={NormalizedArtist}, Target={Target}, NormalizedTarget={NormalizedTarget}, MatchType={MatchType}, Matched={Matched}",
-                scraped.Title,
-                scraped.Artist,
-                normalizedArtist,
-                artist,
-                normalizedTarget,
-                matchType,
-                matched);
-
-            if (!matched) continue;
+            if (!IsMatch(normalizedArtist, normalizedTarget, matchType)) continue;
             matchedCount++;
 
             var applyResult = await ApplyDiscAsync(scraped, byDiscasId, now, reviewNewItems, cancellationToken);
             if (applyResult.Added) addedDiscCount++;
         }
-
-        logger.LogInformation(
-            "一回限りArtist一致判定が完了しました。Target={Target}, MatchType={MatchType}, SearchResultCount={SearchResultCount}, MatchedCount={MatchedCount}, AddedDiscCount={AddedDiscCount}",
-            artist,
-            matchType,
-            snapshot.Products.Count,
-            matchedCount,
-            addedDiscCount);
 
         // 一回限り取得ではArtistSettingやCatalog relationを作らず、CDそのものだけを永続化する。
         await dbContext.SaveChangesAsync(cancellationToken);
