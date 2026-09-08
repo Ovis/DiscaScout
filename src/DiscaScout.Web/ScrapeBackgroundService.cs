@@ -99,7 +99,6 @@ public sealed class ScrapeBackgroundService(
                         case ManualWorkType.CategoryScrape:
                         {
                             if (item.Category is null) throw new InvalidOperationException("CategoryScrape要求にCategoryが設定されていない");
-
                             var result = await scope.ServiceProvider.GetRequiredService<ScrapeRunCoordinator>()
                                 .ExecuteManualCategoryAsync(item.Category.Value, ct);
                             if (result.IsSuccess)
@@ -115,6 +114,20 @@ public sealed class ScrapeBackgroundService(
                         {
                             if (item.ArtistSettingId is null) throw new InvalidOperationException("ArtistCatalog要求にArtistSettingIdが設定されていない");
                             await scope.ServiceProvider.GetRequiredService<ArtistCatalogCollectionService>().CollectAsync(item.ArtistSettingId.Value, ct);
+                            await store.MarkCompletedAsync(item.Id, DateTime.UtcNow, ct);
+                            break;
+                        }
+                        case ManualWorkType.OneShotArtistCatalog:
+                        {
+                            if (string.IsNullOrWhiteSpace(item.OneShotArtist) || item.OneShotMatchType is null)
+                                throw new InvalidOperationException("OneShotArtistCatalog要求に検索条件が設定されていない");
+
+                            // 通常取得やArtist全作品取得と同じ実行ゲート内で処理し、DISCASへの長時間アクセスを並列化しない。
+                            await scope.ServiceProvider.GetRequiredService<OneShotArtistCatalogCollectionService>().CollectAsync(
+                                item.OneShotArtist,
+                                item.OneShotMatchType.Value,
+                                item.OneShotReviewNewItems,
+                                ct);
                             await store.MarkCompletedAsync(item.Id, DateTime.UtcNow, ct);
                             break;
                         }
@@ -150,9 +163,7 @@ public sealed class ScrapeBackgroundService(
     {
         var notifier = serviceProvider.GetRequiredService<DiscordNotificationService>();
         foreach (var result in execution.Categories)
-        {
             await notifier.NotifyScrapeAsync(executionType, result, result.NextRetryAt, cancellationToken);
-        }
     }
 
     /// <summary>ScrapeExecutionGateの「実行できた / busyだった」をnullで判別するための参照型マーカー</summary>
