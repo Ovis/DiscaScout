@@ -44,6 +44,7 @@ public sealed class OperationsViewModel
         ManualWorkType.FullScrape => "通常取得",
         ManualWorkType.CategoryScrape => "カテゴリ取得",
         ManualWorkType.ArtistCatalog => "Artist全作品",
+        ManualWorkType.OneShotArtistCatalog => "Artist全作品（一回限り）",
         _ => type.ToString()
     };
 
@@ -51,6 +52,7 @@ public sealed class OperationsViewModel
     {
         ManualWorkType.CategoryScrape => work.Category?.ToString() ?? "-",
         ManualWorkType.ArtistCatalog => work.ArtistSettingId?.ToString() ?? "-",
+        ManualWorkType.OneShotArtistCatalog => work.OneShotArtist ?? "-",
         _ => "-"
     };
 }

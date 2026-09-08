@@ -30,7 +30,7 @@ public sealed class DiscaScoutDbContext(DbContextOptions<DiscaScoutDbContext> op
         var scrapeRetry = modelBuilder.Entity<ScrapeRetry>(); scrapeRetry.HasKey(x => x.Id); scrapeRetry.HasIndex(x => new { x.Status, x.DueAt }); scrapeRetry.HasIndex(x => new { x.Category, x.Status });
         var schedule = modelBuilder.Entity<ScrapeScheduleSettings>(); schedule.HasKey(x => x.Id); schedule.Property(x => x.Id).ValueGeneratedNever();
         var scrapeGuard = modelBuilder.Entity<ScrapeGuardSettings>(); scrapeGuard.HasKey(x => x.Category); scrapeGuard.Property(x => x.Category).ValueGeneratedNever();
-        var manualWork = modelBuilder.Entity<ManualWorkItem>(); manualWork.HasKey(x => x.Id); manualWork.Property(x => x.FailureReason).HasMaxLength(1000); manualWork.HasIndex(x => new { x.Status, x.RequestedAt }); manualWork.HasIndex(x => new { x.Type, x.Status }); manualWork.HasIndex(x => new { x.ArtistSettingId, x.Status });
+        var manualWork = modelBuilder.Entity<ManualWorkItem>(); manualWork.HasKey(x => x.Id); manualWork.Property(x => x.FailureReason).HasMaxLength(1000); manualWork.Property(x => x.OneShotArtist).HasMaxLength(1000); manualWork.HasIndex(x => new { x.Status, x.RequestedAt }); manualWork.HasIndex(x => new { x.Type, x.Status }); manualWork.HasIndex(x => new { x.ArtistSettingId, x.Status });
         var discord = modelBuilder.Entity<DiscordNotificationSettings>(); discord.HasKey(x => x.Id); discord.Property(x => x.Id).ValueGeneratedNever(); discord.Property(x => x.WebhookUrl).HasMaxLength(2048);
     }
 }

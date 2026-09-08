@@ -22,7 +22,13 @@
         .preview-grid { display: grid; grid-template-columns: repeat(4, minmax(130px, 1fr)); gap: 10px; margin: 12px 0; }
         .preview-stat { background: white; border: 1px solid #dce5f2; border-radius: 7px; padding: 10px; }
         .preview-stat strong { display: block; font-size: 22px; margin-top: 3px; }
-        .form-row { display: grid; grid-template-columns: minmax(200px, 1fr) 140px auto auto auto auto; gap: 10px; align-items: end; }
+        .add-form { display: grid; gap: 10px; }
+        .add-top-row { display: grid; grid-template-columns: minmax(260px, 1fr) 140px auto; gap: 10px; align-items: end; }
+        .mode-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+        .mode-card { display: block; border: 1px solid #d7dce3; border-radius: 7px; padding: 10px 12px; font-size: 13px; font-weight: 650; }
+        .mode-title { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+        .mode-options { display: flex; flex-wrap: wrap; gap: 6px 16px; padding-left: 22px; }
+        .mode-options label.check { padding-bottom: 0; }
         label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; font-weight: 650; }
         label.check { flex-direction: row; align-items: center; padding-bottom: 8px; white-space: nowrap; }
         input[type=text], select { padding: 8px; border: 1px solid #c9ced6; border-radius: 6px; background: white; }
@@ -30,7 +36,7 @@
         button.primary { background: #165dce; }
         button.secondary { background: #5f6b7a; }
         button.archive { background: #8b3b3b; }
-        button:disabled { cursor: default; opacity: .55; }
+        button:disabled, input:disabled { cursor: default; opacity: .55; }
         table { width: 100%; border-collapse: collapse; font-size: 13px; }
         th, td { padding: 10px 8px; border-bottom: 1px solid #e6e9ed; text-align: left; vertical-align: middle; }
         th { color: #5a6470; white-space: nowrap; }
@@ -46,13 +52,17 @@
         .badge.catalog { background: #dff3e4; }
         .badge.match { background: #e9edf2; }
         .badge.review { background: #fff0c9; }
+        .badge.once { background: #dceefc; }
+        @@media (max-width: 760px) {
+            .add-top-row, .mode-grid { grid-template-columns: 1fr; }
+        }
     </style>
 </head>
 <body>
     <main>
         <partial name="_Navigation" />
         <h1>Artist設定</h1>
-        <div class="muted">設定は保存前にローカルCDとの一致件数を確認します。全作品収集は保存後にバックグラウンドで実行します。</div>
+        <div class="muted">保存するArtist設定と、一回だけ全作品を取得して設定を残さない方法を選択できます。</div>
 
         @if (!string.IsNullOrWhiteSpace(Model.StatusMessage))
         {
@@ -61,53 +71,94 @@
 
         @if (Model.Preview is { } preview)
         {
+            var isOneShot = preview.AcquisitionMode == ArtistAcquisitionMode.OneShot;
             <section class="card preview">
-                <h2>保存前の確認</h2>
+                <h2>@(isOneShot ? "取得前の確認" : "保存前の確認")</h2>
                 <div><strong>@preview.Artist</strong> / @(preview.MatchType == ArtistMatchType.Exact ? "完全一致" : "部分一致")</div>
                 <div>
-                    @if (preview.IsWatchEnabled) { <span class="badge watch">新着Watch</span> }
-                    @if (preview.CollectFullCatalog) { <span class="badge catalog">全作品収集</span> }
-                    @if (preview.CollectFullCatalog && preview.ReviewInitialCatalogItems) { <span class="badge review">初回取得を未チェックへ</span> }
+                    @if (isOneShot)
+                    {
+                        <span class="badge once">今回だけ全作品を取得</span>
+                        @if (preview.ReviewOneShotItems) { <span class="badge review">未チェックで保持</span> }
+                    }
+                    else
+                    {
+                        @if (preview.IsWatchEnabled) { <span class="badge watch">新着Watch</span> }
+                        @if (preview.CollectFullCatalog) { <span class="badge catalog">全作品収集</span> }
+                        @if (preview.CollectFullCatalog && preview.ReviewInitialCatalogItems) { <span class="badge review">初回取得を未チェックへ</span> }
+                    }
                 </div>
                 <div class="preview-grid">
                     <div class="preview-stat"><span class="muted">一致する既存CD</span><strong>@preview.MatchCount</strong></div>
                     <div class="preview-stat"><span class="muted">うち確認済み</span><strong>@preview.ReviewedMatchCount</strong></div>
-                    <div class="preview-stat"><span class="muted">新たに一致状態になるCD</span><strong>@preview.NewlyMatchedCount</strong></div>
-                    <div class="preview-stat"><span class="muted">未チェックへ戻せるCD</span><strong>@preview.ReopenCandidateCount</strong></div>
+                    @if (!isOneShot)
+                    {
+                        <div class="preview-stat"><span class="muted">新たに一致状態になるCD</span><strong>@preview.NewlyMatchedCount</strong></div>
+                        <div class="preview-stat"><span class="muted">未チェックへ戻せるCD</span><strong>@preview.ReopenCandidateCount</strong></div>
+                    }
                 </div>
-                <div class="muted">初回取得を未チェックにする設定は、全作品収集で初めて新規発見されたCDだけに適用します。既にローカルにあるCDは下の再確認設定で選択します。</div>
-                <form method="post" asp-controller="Artists" asp-action="@(preview.Id.HasValue ? "Update" : "Add")" class="confirm-actions">
-                    @if (preview.Id.HasValue)
-                    {
-                        <input type="hidden" name="id" value="@preview.Id" />
-                    }
-                    <input type="hidden" name="artist" value="@preview.Artist" />
-                    <input type="hidden" name="matchType" value="@preview.MatchType" />
-                    <input type="hidden" name="isWatchEnabled" value="@preview.IsWatchEnabled.ToString().ToLowerInvariant()" />
-                    <input type="hidden" name="collectFullCatalog" value="@preview.CollectFullCatalog.ToString().ToLowerInvariant()" />
-                    <input type="hidden" name="reviewInitialCatalogItems" value="@preview.ReviewInitialCatalogItems.ToString().ToLowerInvariant()" />
-                    @if (preview.ReopenCandidateCount > 0)
-                    {
-                        <label class="check"><input type="checkbox" name="reopenExistingReviewedMatches" value="true" /> @preview.ReopenCandidateCount 件を未チェックへ戻す</label>
-                    }
-                    <button class="primary" type="submit">この内容で保存</button>
-                    <a href="/artists">キャンセル</a>
-                </form>
+                @if (isOneShot)
+                {
+                    <div class="muted">DISCASの全作品検索を一回だけ実行し、Artist設定やCatalog関係は作成しません。未チェックで保持する場合も、既存の確認済みCDは未チェックへ戻しません。</div>
+                    <form method="post" asp-controller="Artists" asp-action="OneShot" class="confirm-actions">
+                        <input type="hidden" name="artist" value="@preview.Artist" />
+                        <input type="hidden" name="matchType" value="@preview.MatchType" />
+                        <input type="hidden" name="reviewOneShotItems" value="@preview.ReviewOneShotItems.ToString().ToLowerInvariant()" />
+                        <button class="primary" type="submit">今回だけ取得</button>
+                        <a href="/artists">キャンセル</a>
+                    </form>
+                }
+                else
+                {
+                    <div class="muted">初回取得を未チェックにする設定は、全作品収集で初めて新規発見されたCDだけに適用します。既にローカルにあるCDは下の再確認設定で選択します。</div>
+                    <form method="post" asp-controller="Artists" asp-action="@(preview.Id.HasValue ? "Update" : "Add")" class="confirm-actions">
+                        @if (preview.Id.HasValue)
+                        {
+                            <input type="hidden" name="id" value="@preview.Id" />
+                        }
+                        <input type="hidden" name="artist" value="@preview.Artist" />
+                        <input type="hidden" name="matchType" value="@preview.MatchType" />
+                        <input type="hidden" name="isWatchEnabled" value="@preview.IsWatchEnabled.ToString().ToLowerInvariant()" />
+                        <input type="hidden" name="collectFullCatalog" value="@preview.CollectFullCatalog.ToString().ToLowerInvariant()" />
+                        <input type="hidden" name="reviewInitialCatalogItems" value="@preview.ReviewInitialCatalogItems.ToString().ToLowerInvariant()" />
+                        @if (preview.ReopenCandidateCount > 0)
+                        {
+                            <label class="check"><input type="checkbox" name="reopenExistingReviewedMatches" value="true" /> @preview.ReopenCandidateCount 件を未チェックへ戻す</label>
+                        }
+                        <button class="primary" type="submit">この内容で保存</button>
+                        <a href="/artists">キャンセル</a>
+                    </form>
+                }
             </section>
         }
 
         <section class="card">
             <h2>追加</h2>
-            <form method="post" asp-controller="Artists" asp-action="Preview" class="form-row">
-                <label>アーティスト名<input type="text" name="artist" required /></label>
-                <label>
-                    一致方法
-                    <select name="matchType"><option value="Exact">完全一致</option><option value="Contains">部分一致</option></select>
-                </label>
-                <label class="check"><input type="checkbox" name="isWatchEnabled" value="true" checked /> 新着Watch</label>
-                <label class="check"><input type="checkbox" name="collectFullCatalog" value="true" /> 全作品収集</label>
-                <label class="check"><input type="checkbox" name="reviewInitialCatalogItems" value="true" /> 初回取得を未チェックへ</label>
-                <button class="primary" type="submit">一致を確認</button>
+            <form method="post" asp-controller="Artists" asp-action="Preview" class="add-form" id="artist-add-form">
+                <div class="add-top-row">
+                    <label>アーティスト名<input type="text" name="artist" required /></label>
+                    <label>
+                        一致方法
+                        <select name="matchType"><option value="Exact">完全一致</option><option value="Contains">部分一致</option></select>
+                    </label>
+                    <button class="primary" type="submit">一致を確認</button>
+                </div>
+                <div class="mode-grid">
+                    <div class="mode-card">
+                        <label class="mode-title"><input type="radio" name="acquisitionMode" value="SaveSetting" checked data-mode="save" /> Artist設定として保存</label>
+                        <div class="mode-options">
+                            <label class="check"><input type="checkbox" name="isWatchEnabled" value="true" checked data-save-option /> 新着Watch</label>
+                            <label class="check"><input type="checkbox" name="collectFullCatalog" value="true" data-save-option id="collect-full-catalog" /> 全作品収集</label>
+                            <label class="check"><input type="checkbox" name="reviewInitialCatalogItems" value="true" data-save-option id="review-initial-catalog" /> 初回取得を未チェックへ</label>
+                        </div>
+                    </div>
+                    <div class="mode-card">
+                        <label class="mode-title"><input type="radio" name="acquisitionMode" value="OneShot" data-mode="one-shot" /> 今回だけ全作品を取得</label>
+                        <div class="mode-options">
+                            <label class="check"><input type="checkbox" name="reviewOneShotItems" value="true" checked data-one-shot-option /> 未チェックで保持</label>
+                        </div>
+                    </div>
+                </div>
             </form>
         </section>
 
@@ -203,5 +254,30 @@
             }
         </section>
     </main>
+    <script>
+        (() => {
+            const form = document.getElementById('artist-add-form');
+            if (!form) return;
+
+            const saveMode = form.querySelector('[data-mode="save"]');
+            const oneShotMode = form.querySelector('[data-mode="one-shot"]');
+            const collectFullCatalog = form.querySelector('#collect-full-catalog');
+            const reviewInitialCatalog = form.querySelector('#review-initial-catalog');
+            const saveOptions = form.querySelectorAll('[data-save-option]');
+            const oneShotOptions = form.querySelectorAll('[data-one-shot-option]');
+
+            const updateState = () => {
+                const saveSelected = saveMode.checked;
+                saveOptions.forEach(x => x.disabled = !saveSelected);
+                oneShotOptions.forEach(x => x.disabled = saveSelected);
+                reviewInitialCatalog.disabled = !saveSelected || !collectFullCatalog.checked;
+            };
+
+            saveMode.addEventListener('change', updateState);
+            oneShotMode.addEventListener('change', updateState);
+            collectFullCatalog.addEventListener('change', updateState);
+            updateState();
+        })();
+    </script>
 </body>
 </html>

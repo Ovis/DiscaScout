@@ -59,6 +59,54 @@ public sealed class ArtistCatalogTests
     }
 
     [Fact]
+    public async Task ApplyOneShotAsync_設定を作らず新規CDを未チェックで保存する()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        var store = new ArtistCatalogStore(database.Context, new FixedTimeProvider(DateTimeOffset.UtcNow));
+
+        var result = await store.ApplyOneShotAsync(
+            "梶浦由記",
+            ArtistMatchType.Exact,
+            CreateCatalogSnapshot(
+                ("1001", "作品1", "梶浦由記"),
+                ("1002", "参加作品", "別アーティスト")),
+            true);
+
+        Assert.Equal(2, result.SearchResultCount);
+        Assert.Equal(1, result.MatchedCount);
+        Assert.Equal(1, result.AddedDiscCount);
+        Assert.Empty(await database.Context.ArtistSettings.ToListAsync());
+        Assert.Empty(await database.Context.DiscArtistCatalogs.ToListAsync());
+
+        var disc = await database.Context.Discs.Include(x => x.ReviewReasons).SingleAsync();
+        Assert.True(disc.NeedsReview);
+        Assert.Contains(disc.ReviewReasons, x => x.Reason == DiscReviewReasonType.ArtistMatched);
+    }
+
+    [Fact]
+    public async Task ApplyOneShotAsync_未チェック指定でも既存確認済みCDは未チェックへ戻さない()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        var store = new ArtistCatalogStore(database.Context, new FixedTimeProvider(DateTimeOffset.UtcNow));
+        await store.ApplyOneShotAsync(
+            "梶浦由記",
+            ArtistMatchType.Exact,
+            CreateCatalogSnapshot(("1001", "作品1", "梶浦由記")),
+            false);
+
+        database.Context.ChangeTracker.Clear();
+        await store.ApplyOneShotAsync(
+            "梶浦由記",
+            ArtistMatchType.Exact,
+            CreateCatalogSnapshot(("1001", "作品1 更新", "梶浦由記")),
+            true);
+
+        var disc = await database.Context.Discs.Include(x => x.ReviewReasons).SingleAsync();
+        Assert.False(disc.NeedsReview);
+        Assert.DoesNotContain(disc.ReviewReasons, x => x.Reason == DiscReviewReasonType.ArtistMatched);
+    }
+
+    [Fact]
     public async Task NormalSnapshot_Catalogで先に保存したCDが通常カテゴリへ現れたらNewとして未チェックにする()
     {
         await using var database = await TestDatabase.CreateAsync();

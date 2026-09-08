@@ -1,4 +1,5 @@
 using System.Net;
+using Microsoft.Extensions.Logging;
 
 namespace DiscaScout.Scraping;
 
@@ -23,7 +24,8 @@ public interface IDiscasArtistCatalogCrawler
 /// </summary>
 public sealed class DiscasArtistCatalogCrawler(
     DiscasPageFetcher pageFetcher,
-    DiscasSearchResultParser parser) : IDiscasArtistCatalogCrawler
+    DiscasSearchResultParser parser,
+    ILogger<DiscasArtistCatalogCrawler>? logger = null) : IDiscasArtistCatalogCrawler
 {
     /// <inheritdoc />
     public async Task<DiscasArtistCatalogSnapshot> CrawlAsync(
@@ -33,7 +35,22 @@ public sealed class DiscasArtistCatalogCrawler(
         ArgumentException.ThrowIfNullOrWhiteSpace(artist);
 
         var searchArtist = artist.Trim();
-        var firstPage = await FetchAndParsePageAsync(searchArtist, 1, 0, cancellationToken);
+        var searchMode = ArtistSearchMode.Artist;
+        var firstFetch = await FetchPageAsync(searchArtist, 1, searchMode, cancellationToken);
+
+        // AK/AKNはDISCAS側で成立しているアーティスト名を指定する検索であり、
+        // 部分的・旧称など曖昧な名称では404になる。1ページ目が404の場合だけK検索へ切り替え、
+        // 通信障害やサーバー障害まで別検索で隠さないようにする。
+        if (firstFetch.StatusCode == HttpStatusCode.NotFound)
+        {
+            logger?.LogInformation(
+                "DISCASのArtist検索が404のためキーワード検索へフォールバックします。Artist={Artist}",
+                searchArtist);
+            searchMode = ArtistSearchMode.Keyword;
+            firstFetch = await FetchPageAsync(searchArtist, 1, searchMode, cancellationToken);
+        }
+
+        var firstPage = ParsePageOrThrow(searchArtist, 1, 0, firstFetch);
         if (firstPage.TotalCount is null)
         {
             throw new DiscasArtistCatalogCrawlException(searchArtist, "検索結果全体の件数を取得できなかった");
@@ -63,7 +80,9 @@ public sealed class DiscasArtistCatalogCrawler(
 
         for (var pageNumber = 2; pageNumber <= pageCount; pageNumber++)
         {
-            var page = await FetchAndParsePageAsync(searchArtist, pageNumber, products.Count, cancellationToken);
+            // 1ページ目でK検索へフォールバックした場合は、後続ページも同じ検索方式を維持する。
+            var fetch = await FetchPageAsync(searchArtist, pageNumber, searchMode, cancellationToken);
+            var page = ParsePageOrThrow(searchArtist, pageNumber, products.Count, fetch);
             if (page.TotalCount != totalCount)
             {
                 throw new DiscasArtistCatalogCrawlException(
@@ -99,20 +118,44 @@ public sealed class DiscasArtistCatalogCrawler(
         return new DiscasArtistCatalogSnapshot(searchArtist, totalCount, pageCount, products);
     }
 
-    private async Task<DiscasSearchPage> FetchAndParsePageAsync(
+    private async Task<ArtistSearchFetchResult> FetchPageAsync(
+        string artist,
+        int pageNumber,
+        ArtistSearchMode searchMode,
+        CancellationToken cancellationToken)
+    {
+        var uri = searchMode switch
+        {
+            ArtistSearchMode.Artist => DiscasSearchTarget.CreateArtistUri(artist, pageNumber),
+            ArtistSearchMode.Keyword => DiscasSearchTarget.CreateArtistKeywordUri(artist, pageNumber),
+            _ => throw new ArgumentOutOfRangeException(nameof(searchMode))
+        };
+
+        var fetchResult = await pageFetcher.FetchAsync(uri, cancellationToken);
+        return new ArtistSearchFetchResult(uri, fetchResult);
+    }
+
+    private DiscasSearchPage ParsePageOrThrow(
         string artist,
         int pageNumber,
         int sourceRankOffset,
-        CancellationToken cancellationToken)
+        ArtistSearchFetchResult fetch)
     {
-        var uri = DiscasSearchTarget.CreateArtistUri(artist, pageNumber);
-        var fetchResult = await pageFetcher.FetchAsync(uri, cancellationToken);
-
+        var fetchResult = fetch.Result;
         if (fetchResult.StatusCode is < HttpStatusCode.OK or >= HttpStatusCode.MultipleChoices)
         {
+            // DISCAS側の一時障害、検索URL生成不備、リダイレクト後の404を切り分けられるよう、
+            // 失敗時だけ要求URLと最終URLを例外へ含める。
+            var redirected = Uri.Compare(
+                fetch.RequestUri,
+                fetchResult.FinalUri,
+                UriComponents.AbsoluteUri,
+                UriFormat.SafeUnescaped,
+                StringComparison.OrdinalIgnoreCase) != 0;
             throw new DiscasArtistCatalogCrawlException(
                 artist,
-                $"ページ{pageNumber}の取得に失敗した: HTTP {(int)fetchResult.StatusCode} {fetchResult.StatusCode}");
+                $"ページ{pageNumber}の取得に失敗した: HTTP {(int)fetchResult.StatusCode} {fetchResult.StatusCode}; " +
+                $"RequestUri={fetch.RequestUri}; FinalUri={fetchResult.FinalUri}; Redirected={redirected}");
         }
 
         try
@@ -151,6 +194,23 @@ public sealed class DiscasArtistCatalogCrawler(
                 artist,
                 $"ページ{pageNumber}の商品titleIDとhidden titleIdが一致しない");
         }
+    }
+
+    /// <summary>
+    /// Artist Catalogの取得中に維持するDISCAS検索方式
+    /// </summary>
+    private enum ArtistSearchMode
+    {
+        Artist,
+        Keyword
+    }
+
+    /// <summary>
+    /// HTTP取得結果と、リダイレクト前の要求URLをまとめて保持する
+    /// </summary>
+    private sealed record ArtistSearchFetchResult(Uri RequestUri, FetchResult Result)
+    {
+        public HttpStatusCode StatusCode => Result.StatusCode;
     }
 }
 

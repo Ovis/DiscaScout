@@ -20,10 +20,10 @@ public sealed class ArtistsController(
     [HttpGet("")]
     public async Task<IActionResult> Index(CancellationToken cancellationToken) => View(await LoadAsync(null, cancellationToken));
 
-    /// <summary>設定保存前にローカルCDへの一致影響を確認する</summary>
+    /// <summary>設定保存または一回限り取得の実行前にローカルCDへの一致影響を確認する</summary>
     [HttpPost("preview")]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> Preview(long? id, string artist, ArtistMatchType matchType, bool isWatchEnabled, bool collectFullCatalog, bool reviewInitialCatalogItems, CancellationToken cancellationToken)
+    public async Task<IActionResult> Preview(long? id, string artist, ArtistMatchType matchType, ArtistAcquisitionMode acquisitionMode, bool isWatchEnabled, bool collectFullCatalog, bool reviewInitialCatalogItems, bool reviewOneShotItems, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(artist))
         {
@@ -36,7 +36,9 @@ public sealed class ArtistsController(
             return RedirectToAction(nameof(Index));
         }
 
-        var preview = await BuildPreviewAsync(id, artist, matchType, isWatchEnabled, collectFullCatalog, reviewInitialCatalogItems, cancellationToken);
+        // 既存設定の編集では取得方法を切り替えず、従来どおりArtist設定の更新として扱う。
+        if (id.HasValue) acquisitionMode = ArtistAcquisitionMode.SaveSetting;
+        var preview = await BuildPreviewAsync(id, artist, matchType, acquisitionMode, isWatchEnabled, collectFullCatalog, reviewInitialCatalogItems, reviewOneShotItems, cancellationToken);
         return View("Index", await LoadAsync(preview, cancellationToken));
     }
 
@@ -67,6 +69,31 @@ public sealed class ArtistsController(
         return RedirectToAction(nameof(Index));
     }
 
+    /// <summary>Artist設定を保存せず、指定アーティストの全作品取得をバックグラウンドへ登録する</summary>
+    [HttpPost("one-shot")]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> OneShot(string artist, ArtistMatchType matchType, bool reviewOneShotItems, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(artist))
+        {
+            TempData[nameof(ArtistsViewModel.StatusMessage)] = "アーティスト名を入力してください";
+            return RedirectToAction(nameof(Index));
+        }
+
+        var enqueued = await manualWorkStore.TryEnqueueOneShotArtistCatalogAsync(
+            artist,
+            matchType,
+            reviewOneShotItems,
+            DateTime.UtcNow,
+            cancellationToken);
+        if (enqueued) manualWorkSignal.Notify();
+
+        TempData[nameof(ArtistsViewModel.StatusMessage)] = enqueued
+            ? "一回限りの全作品取得を受け付けました。バックグラウンドで実行します"
+            : "同じ条件の一回限り全作品取得は既に保留中または実行中です";
+        return RedirectToAction(nameof(Index));
+    }
+
     /// <summary>Artist設定を更新し、検索条件に影響する変更時は全作品再収集を登録する</summary>
     [HttpPost("update")]
     [ValidateAntiForgeryToken]
@@ -80,10 +107,7 @@ public sealed class ArtistsController(
 
         var current = await dbContext.ArtistSettings.AsNoTracking().SingleAsync(x => x.Id == id, cancellationToken);
         var normalizedArtist = DiscTextNormalizer.Normalize(artist);
-        var shouldCollect = collectFullCatalog
-            && (!current.CollectFullCatalog
-                || current.MatchType != matchType
-                || !string.Equals(current.NormalizedArtist, normalizedArtist, StringComparison.Ordinal));
+        var shouldCollect = collectFullCatalog && (!current.CollectFullCatalog || current.MatchType != matchType || !string.Equals(current.NormalizedArtist, normalizedArtist, StringComparison.Ordinal));
 
         await artistWatchService.UpdateAsync(id, artist, matchType, isWatchEnabled, collectFullCatalog, reopenExistingReviewedMatches, cancellationToken);
         var setting = await dbContext.ArtistSettings.SingleAsync(x => x.Id == id, cancellationToken);
@@ -98,10 +122,7 @@ public sealed class ArtistsController(
             await EnqueueCatalogAsync(id, cancellationToken);
             TempData[nameof(ArtistsViewModel.StatusMessage)] = "設定を保存し、全作品再収集を受け付けました";
         }
-        else
-        {
-            TempData[nameof(ArtistsViewModel.StatusMessage)] = "Artist設定を保存しました";
-        }
+        else TempData[nameof(ArtistsViewModel.StatusMessage)] = "Artist設定を保存しました";
         return RedirectToAction(nameof(Index));
     }
 
@@ -136,13 +157,11 @@ public sealed class ArtistsController(
     public async Task<IActionResult> Collect(long id, CancellationToken cancellationToken)
     {
         var enqueued = await EnqueueCatalogAsync(id, cancellationToken);
-        TempData[nameof(ArtistsViewModel.StatusMessage)] = enqueued
-            ? "全作品収集を受け付けました。バックグラウンドで実行します"
-            : "このArtistの全作品収集は既に保留中または実行中です";
+        TempData[nameof(ArtistsViewModel.StatusMessage)] = enqueued ? "全作品収集を受け付けました。バックグラウンドで実行します" : "このArtistの全作品収集は既に保留中または実行中です";
         return RedirectToAction(nameof(Index));
     }
 
-    private async Task<ArtistsViewModel.ArtistSettingPreview> BuildPreviewAsync(long? id, string artist, ArtistMatchType matchType, bool isWatchEnabled, bool collectFullCatalog, bool reviewInitialCatalogItems, CancellationToken cancellationToken)
+    private async Task<ArtistsViewModel.ArtistSettingPreview> BuildPreviewAsync(long? id, string artist, ArtistMatchType matchType, ArtistAcquisitionMode acquisitionMode, bool isWatchEnabled, bool collectFullCatalog, bool reviewInitialCatalogItems, bool reviewOneShotItems, CancellationToken cancellationToken)
     {
         var normalizedArtist = DiscTextNormalizer.Normalize(artist);
         var matchingDiscs = await dbContext.Discs.AsNoTracking()
@@ -153,66 +172,25 @@ public sealed class ArtistsController(
         HashSet<long> currentMatchIds = [];
         if (id.HasValue)
         {
-            currentMatchIds = (await dbContext.DiscArtistMatches.AsNoTracking()
-                .Where(x => x.ArtistSettingId == id.Value && x.IsCurrentMatch)
-                .Select(x => x.DiscId)
-                .ToListAsync(cancellationToken)).ToHashSet();
-
-            var settingState = await dbContext.ArtistSettings.AsNoTracking()
-                .Where(x => x.Id == id.Value)
-                .Select(x => new { x.InitialCatalogCollectionCompleted, x.ReviewInitialCatalogItems })
-                .SingleAsync(cancellationToken);
-
+            currentMatchIds = (await dbContext.DiscArtistMatches.AsNoTracking().Where(x => x.ArtistSettingId == id.Value && x.IsCurrentMatch).Select(x => x.DiscId).ToListAsync(cancellationToken)).ToHashSet();
+            var settingState = await dbContext.ArtistSettings.AsNoTracking().Where(x => x.Id == id.Value).Select(x => new { x.InitialCatalogCollectionCompleted, x.ReviewInitialCatalogItems }).SingleAsync(cancellationToken);
             // 初回取得済みならdisabled checkboxの未送信値ではなく保存済み設定を引き継ぐ。
             if (settingState.InitialCatalogCollectionCompleted) reviewInitialCatalogItems = settingState.ReviewInitialCatalogItems;
         }
 
         var newlyMatched = matchingDiscs.Where(x => !currentMatchIds.Contains(x.Id)).ToArray();
         var reviewedCount = matchingDiscs.Count(x => !x.NeedsReview);
-        var reopenCandidateCount = isWatchEnabled ? newlyMatched.Count(x => !x.NeedsReview && !x.IsRented) : 0;
-        return new ArtistsViewModel.ArtistSettingPreview(
-            id,
-            artist.Trim(),
-            matchType,
-            isWatchEnabled,
-            collectFullCatalog,
-            reviewInitialCatalogItems,
-            matchingDiscs.Count,
-            reviewedCount,
-            newlyMatched.Length,
-            reopenCandidateCount);
+        var reopenCandidateCount = acquisitionMode == ArtistAcquisitionMode.SaveSetting && isWatchEnabled ? newlyMatched.Count(x => !x.NeedsReview && !x.IsRented) : 0;
+        return new ArtistsViewModel.ArtistSettingPreview(id, artist.Trim(), matchType, acquisitionMode, isWatchEnabled, collectFullCatalog, reviewInitialCatalogItems, reviewOneShotItems, matchingDiscs.Count, reviewedCount, newlyMatched.Length, reopenCandidateCount);
     }
 
     private async Task<ArtistsViewModel> LoadAsync(ArtistsViewModel.ArtistSettingPreview? preview, CancellationToken cancellationToken)
     {
-        var settings = await dbContext.ArtistSettings.AsNoTracking()
-            .OrderBy(x => x.IsArchived)
-            .ThenBy(x => x.Artist)
-            .Select(x => new ArtistsViewModel.ArtistSettingRow(
-                x.Id,
-                x.Artist,
-                x.MatchType,
-                x.IsWatchEnabled,
-                x.CollectFullCatalog,
-                x.ReviewInitialCatalogItems,
-                x.InitialCatalogCollectionCompleted,
-                x.IsArchived,
-                x.DiscMatches.Count(m => m.IsCurrentMatch),
-                x.CatalogEntries.Count(c => c.IsActive)))
+        var settings = await dbContext.ArtistSettings.AsNoTracking().OrderBy(x => x.IsArchived).ThenBy(x => x.Artist)
+            .Select(x => new ArtistsViewModel.ArtistSettingRow(x.Id, x.Artist, x.MatchType, x.IsWatchEnabled, x.CollectFullCatalog, x.ReviewInitialCatalogItems, x.InitialCatalogCollectionCompleted, x.IsArchived, x.DiscMatches.Count(m => m.IsCurrentMatch), x.CatalogEntries.Count(c => c.IsActive)))
             .ToListAsync(cancellationToken);
-
-        var activeIds = (await manualWorkStore.GetActiveAsync(cancellationToken))
-            .Where(x => x.Type == ManualWorkType.ArtistCatalog && x.ArtistSettingId.HasValue)
-            .Select(x => x.ArtistSettingId!.Value)
-            .ToHashSet();
-
-        return new ArtistsViewModel
-        {
-            Settings = settings,
-            ActiveCatalogSettingIds = activeIds,
-            Preview = preview,
-            StatusMessage = TempData[nameof(ArtistsViewModel.StatusMessage)] as string
-        };
+        var activeIds = (await manualWorkStore.GetActiveAsync(cancellationToken)).Where(x => x.Type == ManualWorkType.ArtistCatalog && x.ArtistSettingId.HasValue).Select(x => x.ArtistSettingId!.Value).ToHashSet();
+        return new ArtistsViewModel { Settings = settings, ActiveCatalogSettingIds = activeIds, Preview = preview, StatusMessage = TempData[nameof(ArtistsViewModel.StatusMessage)] as string };
     }
 
     private async Task<bool> EnqueueCatalogAsync(long id, CancellationToken cancellationToken)

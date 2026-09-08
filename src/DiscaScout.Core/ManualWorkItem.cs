@@ -7,7 +7,8 @@ public enum ManualWorkType
 {
     FullScrape = 1,
     ArtistCatalog = 2,
-    CategoryScrape = 3
+    CategoryScrape = 3,
+    OneShotArtistCatalog = 4
 }
 
 /// <summary>
@@ -39,6 +40,21 @@ public sealed class ManualWorkItem
     /// CategoryScrape処理の場合に対象となる通常取得カテゴリ
     /// </summary>
     public ScrapeCategory? Category { get; set; }
+
+    /// <summary>
+    /// 一回限りArtist全作品取得でDISCASへ渡すアーティスト名
+    /// </summary>
+    public string? OneShotArtist { get; set; }
+
+    /// <summary>
+    /// 一回限りArtist全作品取得で使用するアーティスト一致方法
+    /// </summary>
+    public ArtistMatchType? OneShotMatchType { get; set; }
+
+    /// <summary>
+    /// 一回限りArtist全作品取得で新規発見したCDを未チェックとして保持するかを示す
+    /// </summary>
+    public bool OneShotReviewNewItems { get; set; }
 
     public DateTime RequestedAt { get; set; }
     public DateTime? StartedAt { get; set; }

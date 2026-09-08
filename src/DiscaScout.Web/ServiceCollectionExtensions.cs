@@ -48,6 +48,7 @@ internal static class ServiceCollectionExtensions
         services.AddScoped<ArtistWatchService>();
         services.AddScoped<ArtistCatalogStore>();
         services.AddScoped<ArtistCatalogCollectionService>();
+        services.AddScoped<OneShotArtistCatalogCollectionService>();
 
         // 運用・通知
         services.AddScoped<DiscordNotificationSettingsStore>();
