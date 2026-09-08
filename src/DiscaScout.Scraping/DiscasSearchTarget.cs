@@ -61,6 +61,36 @@ public static class DiscasSearchTarget
         // DISCASへ送る検索語のバイト列を保持する目的に限ってPath/Queryのcanonicalizationを無効化する。
         var encodedArtist = PercentEncodeWindows31J(artist.Trim());
         var uriString = $"{SearchBaseUri}?AK={encodedArtist}&AKN={encodedArtist}&PA=rt_original_&RT=1&SK=6&SRT=1&PN={pageNumber}";
+        return CreateEncodedSearchUri(uriString);
+    }
+
+    /// <summary>
+    /// アーティスト専用検索が成立しない場合に使用するDISCASのキーワード検索URLを生成する
+    /// </summary>
+    /// <param name="keyword">検索に送信するキーワード</param>
+    /// <param name="pageNumber">1から始まるページ番号</param>
+    /// <returns>キーワード検索結果URL</returns>
+    public static Uri CreateArtistKeywordUri(string keyword, int pageNumber)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(keyword);
+        if (pageNumber < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(pageNumber));
+        }
+
+        // K検索はアーティスト専用検索ではなく汎用検索である。
+        // Artist CatalogではAK検索が404になる曖昧な名称を救済する場合だけ使用し、
+        // 取得後のArtistMatchTypeによる判定で対象アーティストを絞り込む前提とする。
+        var encodedKeyword = PercentEncodeWindows31J(keyword.Trim());
+        var uriString = $"{SearchBaseUri}?K={encodedKeyword}&PN={pageNumber}";
+        return CreateEncodedSearchUri(uriString);
+    }
+
+    /// <summary>
+    /// Windows-31Jでpercent-encode済みの検索URLを、%XX列を書き換えずに生成する
+    /// </summary>
+    private static Uri CreateEncodedSearchUri(string uriString)
+    {
         var creationOptions = new UriCreationOptions
         {
             DangerousDisablePathAndQueryCanonicalization = true
