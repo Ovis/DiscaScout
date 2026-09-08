@@ -43,6 +43,9 @@ public sealed class DiscasArtistCatalogCrawler(
         // 通信障害やサーバー障害まで別検索で隠さないようにする。
         if (firstFetch.StatusCode == HttpStatusCode.NotFound)
         {
+            logger?.LogInformation(
+                "DISCASのArtist検索が404のためキーワード検索へフォールバックします。Artist={Artist}",
+                searchArtist);
             searchMode = ArtistSearchMode.Keyword;
             firstFetch = await FetchPageAsync(searchArtist, 1, searchMode, cancellationToken);
         }
@@ -127,14 +130,6 @@ public sealed class DiscasArtistCatalogCrawler(
             ArtistSearchMode.Keyword => DiscasSearchTarget.CreateArtistKeywordUri(artist, pageNumber),
             _ => throw new ArgumentOutOfRangeException(nameof(searchMode))
         };
-
-        // フォールバック後に実際にどのURLへアクセスしているかを確認するための診断ログ。
-        // 問題の切り分けが完了したらログレベルや出力有無を改めて見直す。
-        logger?.LogInformation(
-            "DISCAS Artist Catalog検索を取得します。Mode={SearchMode}, Page={PageNumber}, Url={SearchUrl}",
-            searchMode,
-            pageNumber,
-            uri.OriginalString);
 
         var fetchResult = await pageFetcher.FetchAsync(uri, cancellationToken);
         return new ArtistSearchFetchResult(uri, fetchResult);
