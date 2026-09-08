@@ -110,9 +110,18 @@ public sealed class DiscasArtistCatalogCrawler(
 
         if (fetchResult.StatusCode is < HttpStatusCode.OK or >= HttpStatusCode.MultipleChoices)
         {
+            // DISCAS側の一時障害、検索URL生成不備、リダイレクト後の404を切り分けられるよう、
+            // 失敗時だけ要求URLと最終URLを例外へ含める。
+            var redirected = !Uri.Compare(
+                uri,
+                fetchResult.FinalUri,
+                UriComponents.AbsoluteUri,
+                UriFormat.SafeUnescaped,
+                StringComparison.OrdinalIgnoreCase).Equals(0);
             throw new DiscasArtistCatalogCrawlException(
                 artist,
-                $"ページ{pageNumber}の取得に失敗した: HTTP {(int)fetchResult.StatusCode} {fetchResult.StatusCode}");
+                $"ページ{pageNumber}の取得に失敗した: HTTP {(int)fetchResult.StatusCode} {fetchResult.StatusCode}; " +
+                $"RequestUri={uri}; FinalUri={fetchResult.FinalUri}; Redirected={redirected}");
         }
 
         try
