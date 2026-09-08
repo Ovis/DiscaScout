@@ -80,6 +80,26 @@ public sealed class ManualWorkStoreTests
     }
 
     [Fact]
+    public async Task TryEnqueueOneShotArtistCatalogAsync_同一条件は重複防止しオプション違いは登録できる()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        var store = new ManualWorkStore(database.Context);
+        var now = new DateTime(2026, 9, 8, 2, 30, 0, DateTimeKind.Utc);
+
+        Assert.True(await store.TryEnqueueOneShotArtistCatalogAsync("梶浦由記", ArtistMatchType.Exact, true, now));
+        Assert.False(await store.TryEnqueueOneShotArtistCatalogAsync("梶浦由記", ArtistMatchType.Exact, true, now.AddMinutes(1)));
+        Assert.True(await store.TryEnqueueOneShotArtistCatalogAsync("梶浦由記", ArtistMatchType.Exact, false, now.AddMinutes(2)));
+
+        var items = await database.Context.ManualWorkItems.AsNoTracking().OrderBy(x => x.RequestedAt).ToListAsync();
+        Assert.Equal(2, items.Count);
+        Assert.All(items, x => Assert.Equal(ManualWorkType.OneShotArtistCatalog, x.Type));
+        Assert.Equal("梶浦由記", items[0].OneShotArtist);
+        Assert.Equal(ArtistMatchType.Exact, items[0].OneShotMatchType);
+        Assert.True(items[0].OneShotReviewNewItems);
+        Assert.False(items[1].OneShotReviewNewItems);
+    }
+
+    [Fact]
     public async Task GetNextPendingAsync_要求時刻が最も古い処理を返す()
     {
         await using var database = await TestDatabase.CreateAsync();
@@ -148,9 +168,7 @@ public sealed class ManualWorkStoreTests
         {
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
-            var options = new DbContextOptionsBuilder<DiscaScoutDbContext>()
-                .UseSqlite(connection)
-                .Options;
+            var options = new DbContextOptionsBuilder<DiscaScoutDbContext>().UseSqlite(connection).Options;
             var context = new DiscaScoutDbContext(options);
             await context.Database.EnsureCreatedAsync();
             return new TestDatabase(connection, context);
