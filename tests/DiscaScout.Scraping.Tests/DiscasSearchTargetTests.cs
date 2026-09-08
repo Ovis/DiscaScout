@@ -22,7 +22,9 @@ public sealed class DiscasSearchTargetTests
     {
         var uri = DiscasSearchTarget.CreateArtistKeywordUri("ももいろクローバー", 2);
 
-        Assert.Contains("K=%82%E0%82%E0%82%A2%82%EB%83N%83%8D%81%5B%83o%81%5B", uri.OriginalString, StringComparison.OrdinalIgnoreCase);
+        // 非ASCII文字を構成する全バイトを%XX形式にする実装なので、
+        // Shift_JISの後続バイトがASCII文字と同じ値でもそのまま出力しない。
+        Assert.Contains("K=%82%E0%82%E0%82%A2%82%EB%83%4E%83%8D%81%5B%83%6F%81%5B", uri.OriginalString, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("PN=2", uri.Query, StringComparison.Ordinal);
         Assert.DoesNotContain("AK=", uri.OriginalString, StringComparison.OrdinalIgnoreCase);
     }
