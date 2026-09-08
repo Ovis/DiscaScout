@@ -49,22 +49,12 @@ public sealed class ArtistCatalogStore(
             var normalizedArtist = DiscTextNormalizer.Normalize(scraped.Artist);
             if (!ArtistWatchMatcher.IsMatch(normalizedArtist, setting)) continue;
             matchedCount++;
-            var genre = await genreResolver.ResolveAsync(scraped.GenreLarge, scraped.GenreMiddle, scraped.GenreSmall, cancellationToken);
 
-            if (!byDiscasId.TryGetValue(scraped.DiscasId, out var disc))
-            {
-                disc = CreateCatalogOnlyDisc(scraped, genre?.Id, now, reviewInitialItems);
-                dbContext.Discs.Add(disc);
-                discs.Add(disc);
-                byDiscasId.Add(disc.DiscasId, disc);
-                addedDiscCount++;
-                disc.ArtistCatalogEntries.Add(CreateRelation(setting, now));
-                activatedCount++;
-                continue;
-            }
+            var applyResult = await ApplyDiscAsync(scraped, byDiscasId, now, reviewInitialItems, cancellationToken);
+            if (applyResult.Added) addedDiscCount++;
 
-            seenDiscIds.Add(disc.Id);
-            if (disc.Sources.Count == 0) ApplyCatalogMetadata(disc, scraped, genre?.Id, now);
+            var disc = applyResult.Disc;
+            if (!applyResult.Added) seenDiscIds.Add(disc.Id);
             if (!relationByDiscId.TryGetValue(disc.Id, out var existingRelation))
             {
                 disc.ArtistCatalogEntries.Add(CreateRelation(setting, now));
@@ -95,6 +85,76 @@ public sealed class ArtistCatalogStore(
         await transaction.CommitAsync(cancellationToken);
         return new ArtistCatalogApplyResult(snapshot.TotalCount, matchedCount, addedDiscCount, activatedCount, deactivatedCount);
     }
+
+    /// <summary>
+    /// Artist設定を作成せず、一回限りのアーティスト検索結果をCDへ取り込む
+    /// </summary>
+    /// <param name="artist">検索条件として指定したアーティスト名</param>
+    /// <param name="matchType">検索結果のアーティスト表記に対する一致方法</param>
+    /// <param name="snapshot">DISCASから取得した検索結果全体</param>
+    /// <param name="reviewNewItems">今回新規登録したCDを未チェックとして保持するか</param>
+    public async Task<OneShotArtistCatalogApplyResult> ApplyOneShotAsync(
+        string artist,
+        ArtistMatchType matchType,
+        DiscasArtistCatalogSnapshot snapshot,
+        bool reviewNewItems,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(artist);
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        var normalizedTarget = DiscTextNormalizer.Normalize(artist);
+        var now = clock.GetUtcNow().UtcDateTime;
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        var discs = await dbContext.Discs.Include(x => x.Sources).Include(x => x.ArtistCatalogEntries).ToListAsync(cancellationToken);
+        var byDiscasId = discs.ToDictionary(x => x.DiscasId, StringComparer.Ordinal);
+        var matchedCount = 0;
+        var addedDiscCount = 0;
+
+        foreach (var scraped in snapshot.Products)
+        {
+            var normalizedArtist = DiscTextNormalizer.Normalize(scraped.Artist);
+            if (!IsMatch(normalizedArtist, normalizedTarget, matchType)) continue;
+            matchedCount++;
+
+            var applyResult = await ApplyDiscAsync(scraped, byDiscasId, now, reviewNewItems, cancellationToken);
+            if (applyResult.Added) addedDiscCount++;
+        }
+
+        // 一回限り取得ではArtistSettingやCatalog relationを作らず、CDそのものだけを永続化する。
+        await dbContext.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return new OneShotArtistCatalogApplyResult(snapshot.TotalCount, matchedCount, addedDiscCount);
+    }
+
+    private async Task<DiscApplyResult> ApplyDiscAsync(
+        ScrapedDisc scraped,
+        Dictionary<string, Disc> byDiscasId,
+        DateTime now,
+        bool needsReviewForNewDisc,
+        CancellationToken cancellationToken)
+    {
+        var genre = await genreResolver.ResolveAsync(scraped.GenreLarge, scraped.GenreMiddle, scraped.GenreSmall, cancellationToken);
+        if (!byDiscasId.TryGetValue(scraped.DiscasId, out var disc))
+        {
+            disc = CreateCatalogOnlyDisc(scraped, genre?.Id, now, needsReviewForNewDisc);
+            dbContext.Discs.Add(disc);
+            byDiscasId.Add(disc.DiscasId, disc);
+            return new DiscApplyResult(disc, true);
+        }
+
+        // 通常カテゴリ由来の情報をCatalog検索で上書きしない既存仕様を、一回限り取得でも維持する。
+        if (disc.Sources.Count == 0) ApplyCatalogMetadata(disc, scraped, genre?.Id, now);
+        return new DiscApplyResult(disc, false);
+    }
+
+    private static bool IsMatch(string normalizedArtist, string normalizedTarget, ArtistMatchType matchType) =>
+        matchType switch
+        {
+            ArtistMatchType.Exact => string.Equals(normalizedArtist, normalizedTarget, StringComparison.Ordinal),
+            ArtistMatchType.Contains => normalizedArtist.Contains(normalizedTarget, StringComparison.Ordinal),
+            _ => throw new ArgumentOutOfRangeException(nameof(matchType), matchType, null)
+        };
 
     private static Disc CreateCatalogOnlyDisc(ScrapedDisc scraped, long? genreId, DateTime now, bool needsReview)
     {
@@ -139,7 +199,12 @@ public sealed class ArtistCatalogStore(
         disc.LastSeenAt = now;
         disc.LastUpdatedAt = now;
     }
+
+    private sealed record DiscApplyResult(Disc Disc, bool Added);
 }
 
 /// <summary>Artist全作品スナップショットの反映結果を保持する</summary>
 public sealed record ArtistCatalogApplyResult(int SearchResultCount, int MatchedCount, int AddedDiscCount, int ActivatedCount, int DeactivatedCount);
+
+/// <summary>一回限りのArtist全作品取得結果を保持する</summary>
+public sealed record OneShotArtistCatalogApplyResult(int SearchResultCount, int MatchedCount, int AddedDiscCount);
